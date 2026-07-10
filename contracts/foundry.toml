@@ -1,0 +1,37 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+via_ir = true
+optimizer = true
+optimizer_runs = 200
+solc_version = "0.8.27"
+fs_permissions = [
+    { access = "read-write", path = "deployments/" },
+    { access = "read", path = "../circuits/build/" },
+    { access = "read", path = "test/fixtures/" },
+]
+remappings = [
+    "forge-std/=lib/forge-std/src/",
+    "@openzeppelin/=lib/openzeppelin-contracts/",
+    "@eerc/=lib/EncryptedERC/contracts/",
+]
+
+[profile.default.fuzz]
+runs = 256
+
+[profile.default.invariant]
+runs = 128
+depth = 32
+fail_on_revert = false
+
+# Network configurations — Avalanche
+[rpc_endpoints]
+avalanche_testnet = "https://api.avax-test.network/ext/bc/C/rpc"
+avalanche_mainnet = "https://api.avax.network/ext/bc/C/rpc"
+local = "http://127.0.0.1:8545"
+
+# Verification (SnowTrace)
+[etherscan]
+avalanche_testnet = { key = "${SNOWTRACE_API_KEY}", url = "https://api-testnet.snowtrace.io/api" }
+avalanche_mainnet = { key = "${SNOWTRACE_API_KEY}", url = "https://api.snowtrace.io/api" }
