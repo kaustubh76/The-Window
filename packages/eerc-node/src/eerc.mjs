@@ -7,7 +7,6 @@ import {
   genPrivKey,
   genRandomBabyJubValue,
   poseidonEncrypt,
-  poseidonDecrypt,
 } from "maci-crypto";
 import { poseidon3 } from "poseidon-lite";
 import { randomBytes } from "node:crypto";
@@ -22,6 +21,10 @@ export const ART = {
   registration: {
     wasm: `${EERC_CIRCOM}/registration/registration.wasm`,
     zkey: `${EERC_CIRCOM}/registration/circuit_final.zkey`,
+  },
+  withdraw: {
+    wasm: `${EERC_CIRCOM}/withdraw/withdraw.wasm`,
+    zkey: `${EERC_CIRCOM}/withdraw/circuit_final.zkey`,
   },
   transfer: {
     wasm: `${EERC_CIRCOM}/transfer/transfer.wasm`,
@@ -72,6 +75,15 @@ export function genUser() {
   return { privateKey, formattedPrivateKey, publicKey };
 }
 
+// Deterministic eERC user from a raw scalar (so services can reconstruct an
+// actor's BJJ key later, e.g. to decrypt their eERC balance).
+export function userFromRaw(rawPriv) {
+  const privateKey = BigInt(rawPriv);
+  const formattedPrivateKey = formatPrivKeyForBabyJub(privateKey) % subOrder;
+  const publicKey = mulPointEscalar(Base8, formattedPrivateKey).map((x) => BigInt(x));
+  return { privateKey, formattedPrivateKey, publicKey };
+}
+
 export function registrationHash(chainId, formattedPrivateKey, eoaAddress) {
   return poseidon3([BigInt(chainId), formattedPrivateKey, BigInt(eoaAddress)]);
 }
@@ -103,15 +115,6 @@ export function processPoseidonEncryption(inputs, publicKey) {
   const authKey = mulPointEscalar(Base8, encRandom).map(BigInt);
   const ciphertext = poseidonEncrypt(inputs, poseidonKey, nonce).map(BigInt);
   return { ciphertext, nonce, encRandom, authKey };
-}
-
-export function decryptPCT(privateKey, pct, length = 1) {
-  // pct layout = [...ciphertext(4), ...authKey(2), nonce]
-  const ciphertext = pct.slice(0, 4);
-  const authKey = pct.slice(4, 6);
-  const nonce = pct[6];
-  const key = mulPointEscalar(authKey, formatPrivKeyForBabyJub(privateKey));
-  return poseidonDecrypt(ciphertext, key, nonce, length).map(BigInt);
 }
 
 // snarkjs proof -> Solidity ProofPoints (a,b,c) with correct G2 coordinate order.
@@ -233,6 +236,31 @@ export async function genSolvencyProof(buildDir, ownerScalar, coll, loan) {
     cColl: egct(cc.cipher), cLoan: egct(cl.cipher),
     ownerPub: [ownerPub[0], ownerPub[1]],
   };
+}
+
+// eERC withdraw proof — mirrors ava-labs/EncryptedERC test/helpers.ts withdraw.
+// senderEncryptedBalance = current on-chain eGCT as [c1x,c1y,c2x,c2y]; senderBalance
+// = its plaintext; auditorPub = the eERC auditor's public key.
+export async function genWithdrawProof(user, amount, senderBalance, senderEncryptedBalance, auditorPub) {
+  const newBalance = BigInt(senderBalance) - BigInt(amount);
+  const snd = processPoseidonEncryption([newBalance], user.publicKey);
+  const aud = processPoseidonEncryption([BigInt(amount)], auditorPub);
+  const input = {
+    ValueToWithdraw: BigInt(amount),
+    SenderPrivateKey: user.formattedPrivateKey,
+    SenderPublicKey: user.publicKey,
+    SenderBalance: BigInt(senderBalance),
+    SenderBalanceC1: senderEncryptedBalance.slice(0, 2),
+    SenderBalanceC2: senderEncryptedBalance.slice(2, 4),
+    AuditorPublicKey: auditorPub,
+    AuditorPCT: aud.ciphertext,
+    AuditorPCTAuthKey: aud.authKey,
+    AuditorPCTNonce: aud.nonce,
+    AuditorPCTRandom: aud.encRandom,
+  };
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, ART.withdraw.wasm, ART.withdraw.zkey);
+  const fp = await formatProof(proof, publicSignals);
+  return { a: fp.a, b: fp.b, c: fp.c, publicSignals: fp.publicSignals, balancePCT: [...snd.ciphertext, ...snd.authKey, snd.nonce] };
 }
 
 export async function genRegistrationProof({ formattedPrivateKey, publicKey }, eoaAddress, chainId) {
