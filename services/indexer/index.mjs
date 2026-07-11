@@ -14,12 +14,16 @@ const cipher = (egct) => ({
   c2: [egct.c2.x.toString(), egct.c2.y.toString()],
 });
 
+const BLOCK_SEC = Number(process.env.BLOCK_SEC || 2); // display estimate for deadlines
 let H;
 const state = {
   epochs: new Map(), // epoch -> {status, openedAt, closesAt}
   prints: new Map(), // epoch -> MoniaPrint
   loans: [], // Loan[]
   members: [], // MemberInfo[]
+  events: [], // recent WindowEvent-ish firehose
+  bids: {}, // address -> MyBid[]
+  tenorMs: 0,
   lastBlock: 0,
 };
 
@@ -29,7 +33,13 @@ async function rebuild() {
   H = handles();
   const oracleI = H.oracle.interface;
   const epochLen = Number(await H.auction.epochLength());
+  const tenorBlocks = Number(await H.book.tenorBlocks());
+  state.tenorMs = tenorBlocks * BLOCK_SEC * 1000;
+  const blk = await provider.getBlock("latest");
+  const nowTs = Number(blk.timestamp);
+  const curBlock = blk.number;
   const cur = Number(await H.auction.currentEpoch());
+  const events = [];
 
   // epochs + clock
   state.epochs.clear();
@@ -64,7 +74,7 @@ async function rebuild() {
       }));
     } catch { /* attested / non-decodable */ }
     const pr = await H.oracle.prints(epoch);
-    state.prints.set(epoch, {
+    const print = {
       epoch,
       rStarBps: rTick === NO_TRADE ? null : bps(rTick),
       aggVolume: pr.aggVolume.toString(),
@@ -72,7 +82,17 @@ async function rebuild() {
       pocd: { verified: true, txHash: ev.transactionHash },
       printedAt: Number(pr.printedAt) * 1000,
       stale: false,
-    });
+    };
+    state.prints.set(epoch, print);
+    events.push({ type: "RatePrinted", block: ev.blockNumber, print });
+  }
+  // no-trade epochs (curve didn't cross)
+  for (const ev of await H.oracle.queryFilter(H.oracle.filters.NoTrade(), 0, "latest")) {
+    const epoch = Number(ev.args.epoch);
+    if (!state.prints.has(epoch)) {
+      state.prints.set(epoch, { epoch, rStarBps: null, aggVolume: "0", depth: [], pocd: { verified: true }, printedAt: 0, stale: true });
+    }
+    events.push({ type: "NoTrade", block: ev.blockNumber, epoch });
   }
 
   // loans
@@ -80,6 +100,7 @@ async function rebuild() {
   const nextId = Number(await H.book.nextLoanId());
   for (let id = 0; id < nextId; id++) {
     const L = await H.book.loans(id);
+    const deadlineBlock = Number(L.deadlineBlock);
     state.loans.push({
       id: String(id),
       epoch: Number(L.epoch),
@@ -87,11 +108,44 @@ async function rebuild() {
       borrower: L.borrower.toLowerCase(),
       rateBps: bps(L.rateTick),
       size: cipher(L.cSize),
-      deadlineBlock: Number(L.deadlineBlock),
-      deadlineAt: 0,
+      deadlineBlock,
+      deadlineAt: (nowTs + Math.max(0, deadlineBlock - curBlock) * BLOCK_SEC) * 1000,
       status: LOAN_STATUS[Number(L.state)],
     });
   }
+  // loan-lifecycle + vault events for the firehose
+  for (const [name, ev] of [
+    ["LoanCreated", H.book.filters.LoanCreated()], ["Funded", H.book.filters.Funded()],
+    ["Repaid", H.book.filters.Repaid()], ["Seized", H.book.filters.Seized()],
+  ]) {
+    for (const e of await H.book.queryFilter(ev, 0, "latest")) {
+      events.push({ type: name, block: e.blockNumber, loanId: (e.args.loanId ?? 0n).toString() });
+    }
+  }
+  for (const [name, ev] of [
+    ["CollateralLocked", H.vault.filters.Locked()], ["CollateralReleased", H.vault.filters.Released()],
+    ["CollateralSeized", H.vault.filters.Seized()],
+  ]) {
+    for (const e of await H.vault.queryFilter(ev, 0, "latest")) {
+      events.push({ type: name, block: e.blockNumber, loanId: (e.args.loanId ?? 0n).toString() });
+    }
+  }
+  state.events = events.sort((a, b) => a.block - b.block).slice(-200);
+
+  // per-member bids (who + tick only; size stays ciphertext)
+  const bids = {};
+  const LOCKED = { c1: ["0", "1"], c2: ["0", "1"] };
+  for (const [side, ev] of [["ask", H.auction.filters.AskSubmitted()], ["bid", H.auction.filters.BidSubmitted()]]) {
+    for (const e of await H.auction.queryFilter(ev, 0, "latest")) {
+      const who = e.args.who.toLowerCase();
+      (bids[who] ||= []).push({
+        id: `${e.args.epoch}-${side}-${e.args.tick}-${e.blockNumber}`,
+        epoch: Number(e.args.epoch), side, tick: Number(e.args.tick), bps: bps(e.args.tick),
+        size: LOCKED, status: "submitted",
+      });
+    }
+  }
+  state.bids = bids;
 
   // members (from MemberAdded events)
   const added = await H.registry.queryFilter(H.registry.filters.MemberAdded(), 0, "latest");
@@ -120,7 +174,17 @@ app.get("/epoch/clock", async (_req, res) => {
   const cur = Number(await H.auction.currentEpoch());
   const e = state.epochs.get(cur) || { epoch: cur, status: "None", openedAt: 0, closesAt: 0, epochLenMs: 0 };
   const blk = await provider.getBlock("latest");
-  res.json({ ...e, profile: process.env.PROFILE || "DEMO", tenorMs: 0, now: Number(blk.timestamp) * 1000 });
+  res.json({ ...e, profile: process.env.PROFILE || "DEMO", tenorMs: state.tenorMs, now: Number(blk.timestamp) * 1000 });
+});
+
+app.get("/events", (req, res) => {
+  const since = Number(req.query.since || 0);
+  res.json(state.events.filter((e) => e.block >= since));
+});
+
+app.get("/bids", (req, res) => {
+  const a = String(req.query.address || "").toLowerCase();
+  res.json((state.bids && state.bids[a]) || []);
 });
 
 // Endpoint paths match dashboard/src/services/indexer.ts (IndexerAPI).

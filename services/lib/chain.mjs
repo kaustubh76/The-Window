@@ -33,13 +33,17 @@ export function contract(addr, name, signerOrPk) {
 }
 
 // Convenience handles built from deployments + a signer (optional).
-// IMPORTANT: all contracts for a given account share ONE NonceManager/signer, so
-// sending across multiple contracts from the same EOA keeps nonces in sync.
+// IMPORTANT: all contracts for a given account share ONE NonceManager/signer, AND
+// repeated handles(pk) calls return the SAME cached bundle — so nonces stay in sync
+// across every contract and every call site for that EOA.
+const _handleCache = new Map();
 export function handles(signerPk) {
+  const key = signerPk || "__read__";
+  if (_handleCache.has(key)) return _handleCache.get(key);
   const d = deployments();
   const runner = signerPk ? wallet(signerPk) : provider;
   const c = (addr, name) => new ethers.Contract(addr, abi(name), runner);
-  return {
+  const bundle = {
     d,
     usdc: c(d.TESTUSDC_ADDR, "SimpleERC20"),
     eerc: c(d.EERC_ADDR, "EncryptedERC"),
@@ -50,4 +54,6 @@ export function handles(signerPk) {
     vault: c(d.COLLATERAL_VAULT_ADDR, "CollateralVault"),
     book: c(d.LOAN_BOOK_ADDR, "LoanBook"),
   };
+  _handleCache.set(key, bundle);
+  return bundle;
 }

@@ -1,0 +1,66 @@
+// Actor registry for the demo stack: EOA keys + roles + deterministic BJJ raw
+// scalars (so eERC balances can be decrypted later). Anvil default keys for local;
+// override any via env. Public test keys only — no real funds.
+import "dotenv/config";
+import { ethers } from "ethers";
+
+const ANVIL = {
+  admin: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", // #0
+  keeper: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d", // #1
+  operator: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a", // #2
+  lender1: "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6", // #3
+  lender2: "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a", // #4
+  borrower: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba", // #5
+  agent4: "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e", // #6
+  agent5: "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356", // #7
+};
+
+const ENV_KEY = {
+  admin: "ADMIN_PK", keeper: "KEEPER_PK", operator: "VAULT_OPERATOR_PK",
+  lender1: "LENDER1_PK", lender2: "LENDER2_PK", borrower: "BORROWER_PK",
+  agent4: "AGENT4_PK", agent5: "AGENT5_PK",
+};
+
+// Deterministic BJJ raw scalar per actor (reconstructable for balance decryption).
+function bjjRaw(name) {
+  return BigInt(ethers.keccak256(ethers.toUtf8Bytes("the-window:bjj:" + name)));
+}
+
+export const ACTORS = {};
+for (const [name, dflt] of Object.entries(ANVIL)) {
+  const pk = process.env[ENV_KEY[name]] || dflt;
+  ACTORS[name] = {
+    name,
+    pk,
+    address: new ethers.Wallet(pk).address.toLowerCase(),
+    bjjRaw: bjjRaw(name),
+    role: name.startsWith("lender") ? "lender" : name === "borrower" || name.startsWith("agent") ? "borrower" : name,
+  };
+}
+
+// address(lowercase) -> actor
+export const BY_ADDRESS = Object.fromEntries(Object.values(ACTORS).map((a) => [a.address, a]));
+
+export function actorByAddress(addr) {
+  return BY_ADDRESS[String(addr).toLowerCase()] || null;
+}
+
+// The bidding agents (all registered members).
+export const AGENTS = [
+  { actor: "lender1", label: "yield-target lender A", side: 0, tick: 6, size: 400n },
+  { actor: "lender2", label: "yield-target lender B", side: 0, tick: 8, size: 500n },
+  { actor: "borrower", label: "desperate borrower", side: 1, tick: 30, size: 350n },
+  { actor: "agent4", label: "opportunistic borrower", side: 1, tick: 12, size: 300n },
+  { actor: "agent5", label: "noise trader", side: 1, tick: 16, size: 120n },
+];
+
+// Members registered on-chain (need MemberRegistry membership to bid / lock).
+export const MEMBER_NAMES = ["lender1", "lender2", "borrower", "agent4", "agent5"];
+
+export const AUDITOR = {
+  priv: BigInt(process.env.AUDITOR_BJJ_PRIV || "2748579834902348905823409582340958234"),
+  pub: [
+    BigInt(process.env.AUDITOR_BJJ_PUB_X || "15126131017275559229883198140197230023892265818363501039953620538039205717764"),
+    BigInt(process.env.AUDITOR_BJJ_PUB_Y || "7504911034826791718448377250227968384413910115391011404817860837847273794444"),
+  ],
+};
