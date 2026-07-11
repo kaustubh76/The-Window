@@ -44,6 +44,15 @@ export interface CurvePoint {
  * Supply (lender asks: minimum acceptable rate) accumulates upward:  S(r) = Σ supply[t≤r].
  * Demand (borrower bids: maximum acceptable rate) accumulates downward: D(r) = Σ demand[t≥r].
  */
+// Defensive: mock depth is bigint micro-USDC; live/indexer JSON may arrive as number|string.
+// Coerce so `bigint += x` never throws and the chart degrades gracefully across adapters.
+function toBig(v: unknown): bigint {
+  if (typeof v === 'bigint') return v;
+  if (v == null) return 0n;
+  const n = Math.trunc(Number(v));
+  return Number.isFinite(n) ? BigInt(n) : 0n;
+}
+
 export function cumulativeCurves(depth: DepthPoint[]): CurvePoint[] {
   const byTick = new Map<TickIndex, DepthPoint>();
   for (const d of depth) byTick.set(d.tick, d);
@@ -52,14 +61,14 @@ export function cumulativeCurves(depth: DepthPoint[]): CurvePoint[] {
   const demandSuffix: UsdcMicro[] = new Array(TICK_COUNT).fill(0n);
   let running = 0n;
   for (let t = TICK_COUNT - 1; t >= 0; t--) {
-    running += byTick.get(t)?.demand ?? 0n;
+    running += toBig(byTick.get(t)?.demand);
     demandSuffix[t] = running;
   }
 
   const out: CurvePoint[] = [];
   let cumSupply = 0n;
   for (let t = 0; t < TICK_COUNT; t++) {
-    cumSupply += byTick.get(t)?.supply ?? 0n;
+    cumSupply += toBig(byTick.get(t)?.supply);
     out.push({ tick: t, bps: tickToBps(t), cumSupply, cumDemand: demandSuffix[t] });
   }
   return out;
