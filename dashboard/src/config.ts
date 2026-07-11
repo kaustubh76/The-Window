@@ -50,6 +50,9 @@ export const CHAIN_ID = Number(env.VITE_CHAIN_ID ?? 43113);
 export const RPC_FUJI = env.VITE_RPC_FUJI ?? 'https://api.avax-test.network/ext/bc/C/rpc';
 export const RPC_LOCAL = env.VITE_RPC_LOCAL ?? 'http://127.0.0.1:8545';
 export const INDEXER_URL = env.VITE_INDEXER_URL ?? '/api';
+// Control API — the backend that performs member/admin/keeper WRITES server-side
+// (proven eerc-node flows) for the disclosed simulated members. See services/control.
+export const CONTROL_URL = env.VITE_CONTROL_URL ?? 'http://127.0.0.1:8899';
 export const SNOWTRACE_URL = env.VITE_SNOWTRACE_URL ?? 'https://testnet.snowtrace.io';
 
 // ---- deployed addresses (live mode) ----

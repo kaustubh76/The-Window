@@ -1,233 +1,146 @@
 import type { WindowAdapter } from '../WindowAdapter';
 import type {
-  Address,
-  Balances,
-  Bps,
-  Ciphertext,
-  DepthPoint,
-  EpochClock,
-  EpochId,
-  Loan,
-  LoanId,
-  LoanStatus,
-  MemberInfo,
-  MoniaPrint,
-  MyBid,
-  OnProof,
-  Profile,
-  SessionState,
-  Side,
-  TickIndex,
-  TxResult,
-  UsdcMicro,
-  WindowEvent,
+  Address, Balances, Bps, Ciphertext, DepthPoint, EpochClock, EpochId, Loan, LoanId,
+  LoanStatus, MemberInfo, MoniaPrint, MyBid, OnProof, Profile, SessionState, Side,
+  TickIndex, TxResult, Unsubscribe, UsdcMicro, WindowEvent,
 } from '../types';
-import { PROFILE } from '../../../config';
-import { readRegistered, readUsdcBalance } from './contracts';
+import { PROFILE, INDEXER_URL, CONTROL_URL } from '../../../config';
 import { IndexerAPI } from '../../../services/indexer';
 
-// Thrown by proof-bearing paths that need the eERC React SDK bridge (not yet attached).
-export class EercNotReady extends Error {
-  constructor(msg = 'eERC bridge not attached — mount useEercBridge in live mode.') {
-    super(msg);
-    this.name = 'EercNotReady';
-  }
+// Live adapter — the dashboard as a full control + view surface for the disclosed
+// SIMULATED members. Public reads come from the indexer; every WRITE is performed
+// server-side by the Control API (services/control) using the proven eerc-node flows
+// (real proofs), so the browser holds no keys and needs no eERC SDK / circuit artifacts.
+const LOCKED: Ciphertext = { c1: ['0', '1'], c2: ['0', '1'] };
+
+async function ctrl(path: string, body?: unknown, method: 'POST' | 'GET' = 'POST'): Promise<any> {
+  const res = await fetch(`${CONTROL_URL}${path}`, {
+    method,
+    headers: body ? { 'content-type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await res.json().catch(() => ({ ok: false, error: `control ${res.status}` }));
+  if (!json.ok) throw new Error(json.error || `control ${path} failed`);
+  return json;
 }
 
-// The eERC React SDK is hooks-only, so proof-bearing writes + encrypted-balance decryption
-// run inside React (see hooks/useEercBridge). LiveAdapter calls through this attached bridge.
-export interface EercBridge {
-  register(a: Address, onP?: OnProof): Promise<TxResult>;
-  wrap(a: Address, amt: UsdcMicro, onP?: OnProof): Promise<TxResult>;
-  unwrap(a: Address, amt: UsdcMicro, onP?: OnProof): Promise<TxResult>;
-  transfer(from: Address, to: Address, amt: UsdcMicro, ref?: string, onP?: OnProof): Promise<TxResult>;
-  encryptedBalance(a: Address): Promise<Ciphertext>;
-  decryptBalance(a: Address): Promise<UsdcMicro>;
-}
-
-const LOCKED_CIPHER: Ciphertext = { c1: ['0', '0'], c2: ['0', '0'] };
-
-/**
- * PHASE 8 — live adapter. Wired today: public TestUSDC balance + registration status
- * (viem reads), and M-ONIA/depth/loans/members via the indexer REST (graceful-empty until
- * it's running). Pending: the 5 money-market contract reads (add ABIs to contracts.ts once
- * deployed) and eERC proof-bearing writes / encrypted-balance decryption (attach the bridge).
- * Nothing here fabricates data — unwired paths throw EercNotReady or return empty.
- */
 export class LiveAdapter implements WindowAdapter {
   readonly mode = 'live' as const;
   private profile: Profile = PROFILE;
-  private bridge: EercBridge | null = null;
+  private actor: Address | null = null; // the selected/connected member address
 
   async init(): Promise<void> {
-    console.warn('[LiveAdapter] money-market contracts + eERC bridge pending — see contracts.ts / useEercBridge.');
+    try { await fetch(`${INDEXER_URL}/health`); } catch { /* graceful-empty until up */ }
   }
 
-  attachEerc(bridge: EercBridge) {
-    this.bridge = bridge;
-  }
-  private eerc(): EercBridge {
-    if (!this.bridge) throw new EercNotReady();
-    return this.bridge;
-  }
+  /** Called by useControlBridge to reflect the connected wallet / selected persona. */
+  setActor(a: Address | null) { this.actor = a ? (a.toLowerCase() as Address) : null; }
 
-  getProfile() {
-    return this.profile;
-  }
-  setProfile(p: Profile) {
-    this.profile = p;
-  }
+  getProfile() { return this.profile; }
+  setProfile(p: Profile) { this.profile = p; }
+
+  // ---- clock ----
   async getEpochClock(): Promise<EpochClock> {
-    try {
-      return (await IndexerAPI.epochClock()) as EpochClock;
-    } catch {
-      // graceful-empty until the indexer is up
-      return {
-        epoch: 0, status: 'Open', profile: this.profile,
-        openedAt: 0, closesAt: 0, epochLenMs: 0, tenorMs: 0, now: 0,
-      };
-    }
+    try { return (await IndexerAPI.epochClock()) as EpochClock; }
+    catch { return { epoch: 0, status: 'Open', profile: this.profile, openedAt: 0, closesAt: 0, epochLenMs: 0, tenorMs: 0, now: 0 }; }
   }
-  subscribeClock(cb: (c: EpochClock) => void) {
+  subscribeClock(cb: (c: EpochClock) => void): Unsubscribe {
     const id = setInterval(() => { void this.getEpochClock().then(cb); }, 1000);
     return () => clearInterval(id);
   }
 
-  // ---- public reads (indexer-backed; graceful-empty) ----
-  async getLatestMonia(): Promise<MoniaPrint | null> {
-    try {
-      return (await IndexerAPI.latestMonia()) as MoniaPrint;
-    } catch {
-      return null;
-    }
-  }
-  async getMoniaHistory(limit = 40): Promise<MoniaPrint[]> {
-    try {
-      return (await IndexerAPI.moniaHistory(limit)) as MoniaPrint[];
-    } catch {
-      return [];
-    }
-  }
-  async getDepthCurve(epoch?: EpochId): Promise<DepthPoint[]> {
-    try {
-      return (await IndexerAPI.depth(epoch)) as DepthPoint[];
-    } catch {
-      return [];
-    }
-  }
-  async getMembers(): Promise<MemberInfo[]> {
-    try {
-      return (await IndexerAPI.members()) as MemberInfo[];
-    } catch {
-      return [];
-    }
-  }
-  async getLoanBook(): Promise<Loan[]> {
-    try {
-      return (await IndexerAPI.loans()) as Loan[];
-    } catch {
-      return [];
-    }
+  // ---- public reads (indexer) ----
+  async getLatestMonia(): Promise<MoniaPrint | null> { try { return (await IndexerAPI.latestMonia()) as MoniaPrint; } catch { return null; } }
+  async getMoniaHistory(limit = 40): Promise<MoniaPrint[]> { try { return (await IndexerAPI.moniaHistory(limit)) as MoniaPrint[]; } catch { return []; } }
+  async getDepthCurve(epoch?: EpochId): Promise<DepthPoint[]> { try { return (await IndexerAPI.depth(epoch)) as DepthPoint[]; } catch { return []; } }
+  async getMembers(): Promise<MemberInfo[]> { try { return (await IndexerAPI.members()) as MemberInfo[]; } catch { return []; } }
+  async getLoanBook(filter?: { status?: LoanStatus }): Promise<Loan[]> {
+    try { const l = (await IndexerAPI.loans()) as Loan[]; return filter?.status ? l.filter((x) => x.status === filter.status) : l; }
+    catch { return []; }
   }
   async getRawCiphertexts(epoch: EpochId): Promise<{ side: Side; tick: TickIndex; agg: Ciphertext }[]> {
-    try {
-      return (await IndexerAPI.aggregates(epoch)) as { side: Side; tick: TickIndex; agg: Ciphertext }[];
-    } catch {
-      return [];
-    }
+    try { return (await IndexerAPI.aggregates(epoch)) as { side: Side; tick: TickIndex; agg: Ciphertext }[]; } catch { return []; }
   }
 
   // ---- session-scoped ----
   async getSession(): Promise<SessionState> {
-    return { address: null, registered: false, persona: ['public'] };
+    if (!this.actor) return { address: null, registered: false, persona: ['public'] };
+    const bal = await ctrl(`/member/balance/${this.actor}`, undefined, 'GET').catch(() => ({ registered: false }));
+    return { address: this.actor, registered: !!bal.registered, persona: ['public', 'lender', 'borrower'] };
   }
   async getBalances(a: Address): Promise<Balances> {
-    const [usdc, reg] = await Promise.allSettled([readUsdcBalance(a), readRegistered(a)]);
-    let eercEncrypted = LOCKED_CIPHER;
-    if (this.bridge) {
-      try {
-        eercEncrypted = await this.bridge.encryptedBalance(a);
-      } catch {
-        /* keep locked */
-      }
-    }
+    const b = await ctrl(`/member/balance/${a}`, undefined, 'GET').catch(() => ({ usdc: '0', registered: false, eercClear: null, eercEncrypted: null }));
     return {
-      usdcErc20: usdc.status === 'fulfilled' ? usdc.value : 0n,
-      registered: reg.status === 'fulfilled' ? reg.value : false,
-      eercEncrypted,
+      usdcErc20: BigInt(b.usdc ?? '0'),
+      registered: !!b.registered,
+      eercEncrypted: b.eercEncrypted ?? LOCKED,
+      eercClear: b.eercClear != null ? BigInt(b.eercClear) : undefined,
     };
   }
   async decryptOwnBalance(a: Address): Promise<UsdcMicro> {
-    return this.eerc().decryptBalance(a);
+    const b = await ctrl(`/member/balance/${a}`, undefined, 'GET');
+    return b.eercClear != null ? BigInt(b.eercClear) : 0n;
   }
-  async getMyBids(): Promise<MyBid[]> {
-    return [];
-  }
-  async getMyLoans(): Promise<Loan[]> {
-    return [];
-  }
-
-  // ---- member writes (via eERC bridge) ----
-  async register(a: Address, onP?: OnProof): Promise<TxResult> {
-    return this.eerc().register(a, onP);
-  }
-  async faucet(): Promise<TxResult> {
-    // TestUSDC.mint — a direct viem writeContract once wired; needs a wallet client.
-    throw new EercNotReady('faucet needs a wallet client (wagmi useWriteContract).');
-  }
-  async wrap(a: Address, amt: UsdcMicro, onP?: OnProof): Promise<TxResult> {
-    return this.eerc().wrap(a, amt, onP);
-  }
-  async unwrap(a: Address, amt: UsdcMicro, onP?: OnProof): Promise<TxResult> {
-    return this.eerc().unwrap(a, amt, onP);
-  }
-  async submitAsk(): Promise<TxResult> {
-    throw new EercNotReady('submitAsk needs AuctionHouse + eERC encrypt.');
-  }
-  async submitBid(): Promise<TxResult> {
-    throw new EercNotReady('submitBid needs AuctionHouse + eERC encrypt.');
-  }
-  async lockCollateral(): Promise<TxResult> {
-    throw new EercNotReady('lockCollateral needs CollateralVault + solvency proof.');
-  }
-  async fund(id: LoanId, onP?: OnProof): Promise<TxResult> {
-    // lender → borrower encrypted transfer referencing the loan id
-    void onP;
-    void id;
-    throw new EercNotReady('fund needs the eERC transfer bridge.');
-  }
-  async repay(): Promise<TxResult> {
-    throw new EercNotReady('repay needs the eERC transfer bridge.');
+  async getMyBids(a: Address): Promise<MyBid[]> { try { return (await IndexerAPI.bids(a)) as MyBid[]; } catch { return []; } }
+  async getMyLoans(a: Address): Promise<Loan[]> {
+    const al = a.toLowerCase();
+    return (await this.getLoanBook()).filter((l) => l.lender.toLowerCase() === al || l.borrower.toLowerCase() === al);
   }
 
-  // ---- keeper / admin ----
-  async closeEpoch(): Promise<TxResult> {
-    throw new EercNotReady('closeEpoch needs AuctionHouse.');
+  // ---- writes (Control API, real server-side proofs) ----
+  private async tx(onP: OnProof | undefined, run: () => Promise<any>): Promise<TxResult> {
+    onP?.({ phase: 'proving', label: 'proving (server-side)…' });
+    const r = await run();
+    onP?.({ phase: 'done', label: 'done' });
+    return { ok: true, txHash: r.txHash, proofMs: r.proofMs, gasUsed: r.gasUsed };
   }
-  async seize(): Promise<TxResult> {
-    throw new EercNotReady('seize needs LoanBook.');
+  register(a: Address, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/register', { address: a })); }
+  faucet(a: Address, amt: UsdcMicro) { return this.tx(undefined, () => ctrl('/member/faucet', { address: a, amount: amt.toString() })); }
+  wrap(a: Address, amt: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/wrap', { address: a, amount: amt.toString() })); }
+  unwrap(a: Address, amt: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/unwrap', { address: a, amount: amt.toString() })); }
+  submitAsk(a: Address, tick: TickIndex, size: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/bid', { address: a, side: 0, tick, size: size.toString() })); }
+  submitBid(a: Address, tick: TickIndex, size: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/bid', { address: a, side: 1, tick, size: size.toString() })); }
+  lockCollateral(id: LoanId, _amt: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/lock', { loanId: Number(id) })); }
+  fund(id: LoanId, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/fund', { loanId: Number(id) })); }
+  repay(id: LoanId, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/repay', { loanId: Number(id) })); }
+
+  // ---- keeper ----
+  closeEpoch(_e: EpochId) { return this.tx(undefined, () => ctrl('/keeper/close', {})); }
+  seize(id: LoanId) { return this.tx(undefined, () => ctrl('/keeper/seize', { loanId: Number(id) })); }
+
+  // ---- admin (auditor key stays in services/control) ----
+  async adminDecryptAggregates(e: EpochId): Promise<DepthPoint[]> { return (await ctrl(`/admin/decrypt/${e}`, undefined, 'GET')).depth; }
+  async adminComputeClearing(e: EpochId): Promise<{ rStarBps: Bps | null; depth: DepthPoint[] }> {
+    const c = await ctrl(`/admin/clearing/${e}`, undefined, 'GET');
+    return { rStarBps: c.rStarBps, depth: await this.getDepthCurve(e) };
   }
-  async adminDecryptAggregates(): Promise<DepthPoint[]> {
-    // Admin/auditor decryption runs in the Node services/admin — the browser never holds the key.
-    throw new EercNotReady('admin decryption runs in services/admin (browser never holds the auditor key).');
+  async adminPostPrint(e: EpochId, onP?: OnProof): Promise<TxResult & { print: MoniaPrint }> {
+    onP?.({ phase: 'proving', label: 'admin proving 37-tick PoCD…' });
+    const r = await ctrl(`/admin/print/${e}`, {});
+    onP?.({ phase: 'done', label: 'M-ONIA printed' });
+    const print = (await this.getLatestMonia()) as MoniaPrint;
+    return { ok: true, proofMs: r.proofMs, print };
   }
-  async adminComputeClearing(): Promise<{ rStarBps: Bps | null; depth: DepthPoint[] }> {
-    throw new EercNotReady('admin clearing runs in services/admin.');
-  }
-  async adminPostPrint(): Promise<TxResult & { print: MoniaPrint }> {
-    throw new EercNotReady('postPrint is triggered against services/admin.');
-  }
-  async adminPostMatches(): Promise<TxResult & { loans: Loan[] }> {
-    throw new EercNotReady('postMatches is triggered against services/admin.');
+  async adminPostMatches(e: EpochId): Promise<TxResult & { loans: Loan[] }> {
+    await ctrl(`/admin/matches/${e}`, {});
+    return { ok: true, loans: await this.getLoanBook() };
   }
 
-  subscribe(_cb: (e: WindowEvent) => void) {
-    return () => {};
+  // ---- firehose (poll indexer /events) ----
+  private lastBlock = 0;
+  subscribe(cb: (e: WindowEvent) => void): Unsubscribe {
+    const id = setInterval(async () => {
+      try {
+        const evs = await IndexerAPI.events(this.lastBlock);
+        for (const e of evs as any[]) {
+          this.lastBlock = Math.max(this.lastBlock, (e.block ?? 0) + 1);
+          if (e.type === 'RatePrinted') cb({ type: 'RatePrinted', print: e.print });
+          else if (e.type === 'Funded') cb({ type: 'LoanFunded', loanId: e.loanId });
+          else cb({ type: 'clock', clock: await this.getEpochClock() } as WindowEvent);
+        }
+      } catch { /* indexer down */ }
+    }, 2000);
+    return () => clearInterval(id);
   }
-  recentEvents(): WindowEvent[] {
-    return [];
-  }
-
-  // silence unused type imports on interface-required generics
-  _t(_a?: LoanStatus) {}
+  recentEvents(): WindowEvent[] { return []; }
 }

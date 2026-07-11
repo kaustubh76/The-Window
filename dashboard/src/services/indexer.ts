@@ -58,5 +58,7 @@ export const IndexerAPI = {
   members: () => getJson('/members'),
   epochClock: () => getJson('/epoch/clock', false),
   aggregates: (epoch: number) => getJson(`/aggregates/${epoch}`),
+  events: (since = 0) => getJson(`/events?since=${since}`, false),
+  bids: (address: string) => getJson(`/bids?address=${address}`, false),
   health: () => getJson('/health', false),
 };

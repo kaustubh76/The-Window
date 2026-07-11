@@ -1,38 +1,24 @@
 import { useEffect } from 'react';
+import { useAccount } from 'wagmi';
 import { ADAPTER_MODE } from '../config';
 import { useAdapterStore } from '../stores/useAdapterStore';
+import type { LiveAdapter } from '../lib/adapter/live/LiveAdapter';
 
-// PHASE 8 — mount once (live mode) to bridge the eERC React SDK into the LiveAdapter.
-// @avalabs/eerc-sdk is hooks-only, so proof-bearing writes + encrypted-balance decryption
-// must run inside React here. Wiring steps (once the SDK package is confirmed & installed):
-//
-//   const { useEERC } = await import('@avalabs/eerc-sdk');
-//   const eerc = useEERC(publicClient, walletClient, EERC_ADDR, circuitURLs);
-//   const enc  = useEncryptedBalance(eerc, TESTUSDC_ADDR);
-//   adapter.attachEerc({
-//     register:  (a, onP) => runProof(onP, () => eerc.register()),
-//     wrap:      (a, amt, onP) => runProof(onP, () => enc.deposit(amt)),
-//     unwrap:    (a, amt, onP) => runProof(onP, () => enc.withdraw(amt)),
-//     transfer:  (from, to, amt, ref, onP) => runProof(onP, () => enc.transfer(to, amt, ref)),
-//     encryptedBalance: (a) => enc.egct(a),
-//     decryptBalance:   (a) => enc.decryptedBalance(),
-//   });
-//
-// Until then this is a no-op so the build stays green (verify-first: never invent the SDK API).
+// Control bridge — in live mode the dashboard is a control + view surface. Writes are
+// performed server-side by the Control API (services/control) using the proven
+// eerc-node flows, so the browser holds no keys and needs no eERC SDK. This hook just
+// reflects the connected wallet / selected persona into the LiveAdapter so session +
+// member ops act as that address.
 export function useEercBridge() {
   const init = useAdapterStore((s) => s.init);
+  const { address } = useAccount();
   useEffect(() => {
     if (ADAPTER_MODE !== 'live') return;
     let alive = true;
     init().then((a) => {
       if (!alive || !a || a.mode !== 'live') return;
-      // const live = a as unknown as LiveAdapter; live.attachEerc(bridge)  ← wire when SDK confirmed
-      if (import.meta.env.DEV) {
-        console.info('[eERC bridge] live mode — attach @avalabs/eerc-sdk in hooks/useEercBridge.ts (see wiring notes).');
-      }
+      (a as unknown as LiveAdapter).setActor((address ?? null) as `0x${string}` | null);
     });
-    return () => {
-      alive = false;
-    };
-  }, [init]);
+    return () => { alive = false; };
+  }, [init, address]);
 }
