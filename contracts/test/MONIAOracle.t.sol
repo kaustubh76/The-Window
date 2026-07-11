@@ -68,18 +68,13 @@ contract MONIAOracleTest is Test {
         d[10].bidSum = 300;
     }
 
-    function _emptyProof()
-        internal
-        pure
-        returns (uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c)
-    {}
+    function _emptyProofs() internal pure returns (MONIAOracle.Groth16Proof[4] memory p) {}
 
     function test_PostPrintComputesCrossing() public {
         _runEpochAndClose();
-        (uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c) = _emptyProof();
 
         vm.prank(admin);
-        oracle.postPrint(1, 4, _depth(), a, b, c);
+        oracle.postPrint(1, 4, _depth(), _emptyProofs());
 
         (uint16 tick, uint256 vol, uint64 ts, bool exists) = oracle.prints(1);
         assertEq(tick, 4, "rStarTick");
@@ -87,45 +82,41 @@ contract MONIAOracleTest is Test {
         assertTrue(exists);
         assertGt(ts, 0);
         assertEq(uint256(ah.epochStatus(1)), uint256(AuctionHouse.Status.Printed));
-        // proof was bound to on-chain accumulators: 2 + 37*10 signals
-        assertEq(mock.lastInputLength(), 2 + 37 * 10);
+        // each chunk proof was bound to on-chain accumulators: 2 + 10*10 signals
+        assertEq(mock.lastInputLength(), 2 + 10 * 10);
     }
 
     function test_WrongClearingTickReverts() public {
         _runEpochAndClose();
-        (uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c) = _emptyProof();
         vm.prank(admin);
         vm.expectRevert(MONIAOracle.WrongClearingTick.selector);
-        oracle.postPrint(1, 5, _depth(), a, b, c);
+        oracle.postPrint(1, 5, _depth(), _emptyProofs());
     }
 
     function test_BadProofReverts() public {
         _runEpochAndClose();
         mock.setResult(false);
-        (uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c) = _emptyProof();
         vm.prank(admin);
         vm.expectRevert(MONIAOracle.BadProof.selector);
-        oracle.postPrint(1, 4, _depth(), a, b, c);
+        oracle.postPrint(1, 4, _depth(), _emptyProofs());
     }
 
     function test_NotClosedReverts() public {
         vm.prank(keeper);
         ah.openEpoch();
-        (uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c) = _emptyProof();
         vm.prank(admin);
         vm.expectRevert(MONIAOracle.EpochNotClosed.selector);
-        oracle.postPrint(1, 4, _depth(), a, b, c);
+        oracle.postPrint(1, 4, _depth(), _emptyProofs());
     }
 
     function test_NoDoublePrint() public {
         _runEpochAndClose();
-        (uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c) = _emptyProof();
         vm.startPrank(admin);
-        oracle.postPrint(1, 4, _depth(), a, b, c);
+        oracle.postPrint(1, 4, _depth(), _emptyProofs());
         // epoch is now Printed, so the Closed-status guard fires first — double
         // print is prevented either way.
         vm.expectRevert(MONIAOracle.EpochNotClosed.selector);
-        oracle.postPrint(1, 4, _depth(), a, b, c);
+        oracle.postPrint(1, 4, _depth(), _emptyProofs());
         vm.stopPrank();
     }
 
@@ -147,10 +138,9 @@ contract MONIAOracleTest is Test {
         MONIAOracle.DepthPoint[] memory d = new MONIAOracle.DepthPoint[](37);
         d[20].askSum = 100;
         d[4].bidSum = 100;
-        (uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c) = _emptyProof();
         uint16 noTrade = oracle.NO_TRADE(); // precompute — external call would eat the prank
         vm.prank(admin);
-        oracle.postPrint(1, noTrade, d, a, b, c);
+        oracle.postPrint(1, noTrade, d, _emptyProofs());
 
         (uint16 tick,,, bool exists) = oracle.prints(1);
         assertEq(tick, noTrade);
@@ -159,8 +149,7 @@ contract MONIAOracleTest is Test {
 
     function test_OnlyAdmin() public {
         _runEpochAndClose();
-        (uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c) = _emptyProof();
         vm.expectRevert(MONIAOracle.NotAdmin.selector);
-        oracle.postPrint(1, 4, _depth(), a, b, c);
+        oracle.postPrint(1, 4, _depth(), _emptyProofs());
     }
 }

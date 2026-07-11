@@ -62,11 +62,15 @@ async function adminPrint(epoch) {
   // clearing (mirror on-chain _computeClearing)
   let demandFrom = bidSum.reduce((x, y) => x + y, 0n), cum = 0n, rStar = 65535;
   for (let t = 0; t < TICKS; t++) { cum += askSum[t]; if (cum > 0n && demandFrom > 0n && cum >= demandFrom) { rStar = t; break; } demandFrom -= bidSum[t]; }
-  log(`epoch ${epoch}: proving 37-tick PoCD (~40s, always live)…`);
+  log(`epoch ${epoch}: proving chunked PoCD (4 x 10-tick proofs, always live)…`);
   const t0 = Date.now();
-  const proof = await genDepthArrayProof(BUILD, S, auditorPub, askAgg, bidAgg, askSum, bidSum);
+  const { proofs } = await genDepthArrayProof(BUILD, S, auditorPub, askAgg, bidAgg, askSum, bidSum);
   log(`PoCD generated in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
-  await (await H.admin.oracle.postPrint(epoch, rStar, depth.map((d) => ({ askSum: d.askSum, bidSum: d.bidSum })), proof.a, proof.b, proof.c)).wait();
+  await (await H.admin.oracle.postPrint(
+    epoch, rStar,
+    depth.map((d) => ({ askSum: d.askSum, bidSum: d.bidSum })),
+    proofs.map((p) => ({ a: p.a, b: p.b, c: p.c }))
+  )).wait();
   log(`★ M-ONIA printed: epoch ${epoch}  r* = ${rStar === 65535 ? "no-trade" : (100 + 25 * rStar) + " bps"}`);
   return rStar;
 }

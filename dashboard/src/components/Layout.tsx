@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import Header from './Header';
 import DemoControlBar from './DemoControlBar';
 import { EpochProgress } from './ui/EpochProgress';
+import { ServicesBanner } from './ui/ServicesBanner';
 import { useWalletSync } from '../hooks/useWalletSync';
 import { useEercBridge } from '../hooks/useEercBridge';
 import { useMarketData } from '../hooks/useMarketData';
@@ -37,6 +38,7 @@ export default function Layout() {
       <div className="relative z-10">
         <Header />
         <EpochProgress />
+        <ServicesBanner />
         <div className="divider-glow" />
         <main
           id="main-content"

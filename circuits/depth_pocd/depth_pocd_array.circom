@@ -2,20 +2,28 @@ pragma circom 2.1.9;
 
 include "../../contracts/lib/EncryptedERC/circom/components.circom";
 
-// DepthCurve PoCD — 37-tick ARRAY version (production).
+// DepthCurve PoCD — CHUNKED array version (production).
 //
-// Proves the WHOLE published depth curve (both sides, all 37 ticks) is the true
+// Proves a 10-tick CHUNK of the published depth curve (both sides) is the true
 // decryption of AuctionHouse's on-chain EGCT accumulators under the auditor key:
-//   (1) auditorPub == auditorPriv · G                          (once)
+//   (1) auditorPub == auditorPriv · G                          (once per chunk)
 //   (2) for every tick t and side s: Dec(auditorPriv, C[s][t]) == claimed[s][t]
 //
-// So the administrator cannot reshape the curve — the SHAPE is proven, not just
-// the totals. Empty ticks read as the identity point (0,1) on-chain and claim 0,
-// which verifies trivially (Dec(identity)=identity=0·G).
+// The full 37-tick curve is proven as K=4 chunks over tick ranges
+// [0..9], [10..19], [20..29], [30..36] — the last chunk pads virtual ticks
+// 37-39 with the identity point (0,1) and claim 0, which verifies trivially
+// (Dec(identity)=identity=0·G), exactly like empty on-chain ticks.
+// Chunking keeps the generated Groth16 verifier under EIP-170's 24,576-byte
+// deployed-code limit (372-signal monolith was 62,708 bytes; 102-signal chunk
+// verifier is ~18KB) so it deploys on real chains (Fuji/mainnet).
 //
-// Public-signal order MUST match MONIAOracle._buildPublicSignals (grouped):
-//   auditorPub[2], askC1[37][2], askC2[37][2], askSum[37],
-//                  bidC1[37][2], bidC2[37][2], bidSum[37]   => 2 + 37*10 = 372.
+// So the administrator cannot reshape the curve — the SHAPE is proven, not just
+// the totals. Cross-chunk swaps fail because each chunk's public signals embed
+// its own accumulator slice.
+//
+// Public-signal order MUST match MONIAOracle._buildChunkSignals (grouped):
+//   auditorPub[2], askC1[10][2], askC2[10][2], askSum[10],
+//                  bidC1[10][2], bidC2[10][2], bidSum[10]   => 2 + 10*10 = 102.
 template DepthPoCDArray(N) {
     signal input auditorPub[2];
     signal input askC1[N][2];
@@ -55,4 +63,4 @@ template DepthPoCDArray(N) {
     }
 }
 
-component main { public [ auditorPub, askC1, askC2, askSum, bidC1, bidC2, bidSum ] } = DepthPoCDArray(37);
+component main { public [ auditorPub, askC1, askC2, askSum, bidC1, bidC2, bidSum ] } = DepthPoCDArray(10);

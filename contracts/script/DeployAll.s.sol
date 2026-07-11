@@ -20,10 +20,7 @@ import {MONIAOracle} from "../src/MONIAOracle.sol";
 import {CollateralVault} from "../src/CollateralVault.sol";
 import {LoanBook} from "../src/LoanBook.sol";
 import {MockVerifier} from "../src/verifiers/MockVerifier.sol";
-// NOTE: DepthPoCDArrayVerifier (372 signals) is ~62KB > EIP-170 (24576). Forge's
-// linker refuses to broadcast it, so it is pre-deployed via cast to an Anvil node
-// launched with --code-size-limit, and its address is passed in by env. (Fuji would
-// use the bid/ask split, README §15.) We only reference it through the small adapter.
+import {DepthPoCDArrayVerifier} from "../src/verifiers/DepthPoCDArrayVerifier.sol";
 import {PoCDVerifierAdapter} from "../src/verifiers/PoCDVerifierAdapter.sol";
 import {CollateralSolvencyVerifier} from "../src/verifiers/CollateralSolvencyVerifier.sol";
 import {SolvencyVerifierAdapter} from "../src/verifiers/SolvencyVerifierAdapter.sol";
@@ -75,9 +72,8 @@ contract DeployAll is Script {
         address pocdVerifier;
         address solvencyVerifier;
         if (real) {
-            // Big array verifier is pre-deployed via cast (see scripts/deploy_local.sh);
-            // wrap its address in the small adapter here.
-            pocdVerifier = address(new PoCDVerifierAdapter(vm.envAddress("DEPTH_ARRAY_VERIFIER_ADDR")));
+            // Chunked PoCD verifier (102 signals, ~18KB) fits EIP-170 and deploys inline.
+            pocdVerifier = address(new PoCDVerifierAdapter(address(new DepthPoCDArrayVerifier())));
             solvencyVerifier = address(new SolvencyVerifierAdapter(address(new CollateralSolvencyVerifier())));
         } else {
             pocdVerifier = address(new MockVerifier());

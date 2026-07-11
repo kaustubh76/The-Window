@@ -70,10 +70,8 @@ contract WindowHandler {
         MONIAOracle.DepthPoint[] memory d = new MONIAOracle.DepthPoint[](37);
         d[4].askSum = 300;
         d[10].bidSum = 300;
-        uint256[2] memory a;
-        uint256[2][2] memory b;
-        uint256[2] memory c;
-        oracle.postPrint(e, 4, d, a, b, c);
+        MONIAOracle.Groth16Proof[4] memory proofs;
+        oracle.postPrint(e, 4, d, proofs);
     }
 
     function act_postMatch() external {

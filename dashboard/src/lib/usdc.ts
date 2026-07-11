@@ -3,6 +3,18 @@ import { formatUnits, parseUnits } from 'viem';
 import { USDC_DECIMALS, minBidMicro, type Profile } from '../config';
 import type { UsdcMicro } from './adapter/types';
 
+// Defensive: the live indexer/control serialize uint256 as decimal strings. The adapter
+// normalizes to bigint, but coerce here too so no render path ever does `string * bigint`.
+function toMicro(v: unknown): bigint {
+  if (typeof v === 'bigint') return v;
+  if (v == null) return 0n;
+  try {
+    return BigInt(typeof v === 'number' ? Math.trunc(v) : String(v).split('.')[0] || '0');
+  } catch {
+    return 0n;
+  }
+}
+
 /** Parse a user-entered decimal string ("12.5") to micro-USDC. Throws on garbage. */
 export function parseUsdc(input: string): UsdcMicro {
   const cleaned = input.trim().replace(/,/g, '');
@@ -17,7 +29,7 @@ export function parseUsdc(input: string): UsdcMicro {
 /** Format micro-USDC to a grouped decimal string, e.g. 1234500000n -> "1,234.50". */
 export function formatUsdc(micro: UsdcMicro, opts: { decimals?: number; group?: boolean } = {}): string {
   const { decimals = 2, group = true } = opts;
-  const raw = formatUnits(micro, USDC_DECIMALS); // e.g. "1234.5"
+  const raw = formatUnits(toMicro(micro), USDC_DECIMALS); // e.g. "1234.5"
   const [whole, frac = ''] = raw.split('.');
   const fixedFrac = (frac + '0'.repeat(decimals)).slice(0, decimals);
   const groupedWhole = group ? whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : whole;
@@ -34,11 +46,11 @@ export function formatUsdcCompact(micro: UsdcMicro): string {
 
 /** Lossy conversion to a JS number — ONLY for chart coordinates / display, never for math. */
 export function microToNumber(micro: UsdcMicro): number {
-  return Number(formatUnits(micro, USDC_DECIMALS));
+  return Number(formatUnits(toMicro(micro), USDC_DECIMALS));
 }
 
 export function belowMinBid(micro: UsdcMicro, profile: Profile): boolean {
-  return micro < minBidMicro(profile);
+  return toMicro(micro) < minBidMicro(profile);
 }
 
 export function addMicro(...xs: UsdcMicro[]): UsdcMicro {
@@ -47,7 +59,7 @@ export function addMicro(...xs: UsdcMicro[]): UsdcMicro {
 
 /** Collateral required for a loan at the fixed 120% haircut. */
 export function requiredCollateral(loanSize: UsdcMicro, haircutBps: number): UsdcMicro {
-  return (loanSize * BigInt(haircutBps)) / 10_000n;
+  return (toMicro(loanSize) * BigInt(haircutBps)) / 10_000n;
 }
 
 /** Health % of a collateral vs loan pair against the haircut (100% = exactly at haircut). */

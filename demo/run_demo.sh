@@ -22,12 +22,12 @@ export AUDITOR_BJJ_PRIV=2748579834902348905823409582340958234
 export AUDITOR_BJJ_PUB_X=15126131017275559229883198140197230023892265818363501039953620538039205717764
 export AUDITOR_BJJ_PUB_Y=7504911034826791718448377250227968384413910115391011404817860837847273794444
 
-echo "== [1/5] fresh anvil (raised code limit) =="
+echo "== [1/5] fresh anvil =="
 pkill -f 'anvil' 2>/dev/null || true
 pkill -f 'services/indexer' 2>/dev/null || true
 pkill -f 'indexer/index.mjs' 2>/dev/null || true
 sleep 1
-anvil --silent --code-size-limit 200000 > /tmp/window_anvil.log 2>&1 &
+anvil --silent > /tmp/window_anvil.log 2>&1 &
 sleep 4
 
 echo "== [2/5] deploy + wire full stack (real verifier) =="

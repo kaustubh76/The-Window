@@ -53,6 +53,8 @@ const denv = [
   "VITE_PROFILE=DEMO",
   `VITE_CHAIN_ID=${CHAIN_ID}`,
   `VITE_RPC_LOCAL=${RPC}`,
+  // the dashboard live path reads VITE_RPC_FUJI when VITE_CHAIN_ID === 43113
+  ...(CHAIN_ID === 43113 ? [`VITE_RPC_FUJI=${RPC}`] : []),
   `VITE_INDEXER_URL=http://127.0.0.1:${process.env.INDEXER_PORT || 8787}`,
   `VITE_CONTROL_URL=http://127.0.0.1:${process.env.CONTROL_PORT || 8899}`,
   `VITE_TESTUSDC_ADDR=${dep.TESTUSDC_ADDR}`,

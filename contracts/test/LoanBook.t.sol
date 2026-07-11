@@ -65,11 +65,9 @@ contract LoanBookTest is Test {
         MONIAOracle.DepthPoint[] memory d = new MONIAOracle.DepthPoint[](37);
         d[4].askSum = 300;
         d[10].bidSum = 300;
-        uint256[2] memory a;
-        uint256[2][2] memory b;
-        uint256[2] memory c;
+        MONIAOracle.Groth16Proof[4] memory proofs;
         vm.prank(admin);
-        oracle.postPrint(1, 4, d, a, b, c);
+        oracle.postPrint(1, 4, d, proofs);
     }
 
     function _match() internal returns (uint256 loanId) {

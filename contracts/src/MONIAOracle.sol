@@ -15,10 +15,23 @@ import {EGCT} from "@eerc/types/Types.sol";
 ///         confidential inputs, accountable administrator, public benchmark.
 contract MONIAOracle {
     uint16 public constant NO_TRADE = type(uint16).max;
+    /// @dev The PoCD is verified as CHUNKS proofs of CHUNK_TICKS ticks each so the
+    ///      generated Groth16 verifier stays under EIP-170 (the 372-signal monolith
+    ///      was 62,708 bytes of deployed code). CHUNKS*CHUNK_TICKS (40) >= TICKS (37);
+    ///      virtual ticks 37-39 are padded with the identity point and zero sums on
+    ///      both the prover and this contract, so a mismatch fails verification.
+    uint16 public constant CHUNK_TICKS = 10;
+    uint16 public constant CHUNKS = 4;
 
     struct DepthPoint {
         uint256 askSum; // decrypted Σ ask sizes at this tick
         uint256 bidSum; // decrypted Σ bid sizes at this tick
+    }
+
+    struct Groth16Proof {
+        uint256[2] a;
+        uint256[2][2] b;
+        uint256[2] c;
     }
 
     struct Print {
@@ -65,21 +78,24 @@ contract MONIAOracle {
     /// @param epoch      the epoch being priced
     /// @param rStarTick  claimed clearing tick (must equal the on-chain crossing)
     /// @param depth      per-tick decrypted sums, length == TICKS (padded)
+    /// @param proofs     CHUNKS Groth16 proofs, proofs[k] covering ticks [k*CHUNK_TICKS, (k+1)*CHUNK_TICKS)
     function postPrint(
         uint64 epoch,
         uint16 rStarTick,
         DepthPoint[] calldata depth,
-        uint256[2] calldata a,
-        uint256[2][2] calldata b,
-        uint256[2] calldata c
+        Groth16Proof[4] calldata proofs
     ) external onlyAdmin {
         if (auctionHouse.epochStatus(epoch) != AuctionHouse.Status.Closed) revert EpochNotClosed();
         if (prints[epoch].exists) revert AlreadyPrinted();
         uint16 ticks = auctionHouse.TICKS();
         if (depth.length != ticks) revert BadDepthLength();
 
-        // 1. Bind the proof to on-chain accumulators + claimed sums + auditor key.
-        if (!verifier.verifyProof(a, b, c, _buildPublicSignals(epoch, depth))) revert BadProof();
+        // 1. Bind every chunk proof to its slice of on-chain accumulators + claimed sums + auditor key.
+        for (uint16 k = 0; k < CHUNKS; k++) {
+            if (!verifier.verifyProof(proofs[k].a, proofs[k].b, proofs[k].c, _buildChunkSignals(epoch, depth, k))) {
+                revert BadProof();
+            }
+        }
 
         // 2. Compute the clearing rate r* ON-CHAIN from the proof-verified depth.
         (uint16 crossing, uint256 matched, bool trade) = _computeClearing(depth);
@@ -129,51 +145,82 @@ contract MONIAOracle {
         return (NO_TRADE, 0, false);
     }
 
-    /// @dev Public-signal vector: auditor pubkey, then per tick the accumulator
-    ///      (c1.x,c1.y,c2.x,c2.y) for ASK and BID plus the claimed sums. The
-    ///      verifier proves each claimed sum decrypts the corresponding accumulator.
-    /// @dev Public-signal vector matching the `depth_pocd_array` circuit's
-    ///      `public [...]` layout (circom flattens arrays GROUPED, not interleaved):
+    /// @dev Public-signal vector for chunk k, matching the `depth_pocd_array`
+    ///      circuit's `public [...]` layout at N = CHUNK_TICKS (circom flattens
+    ///      arrays GROUPED, not interleaved):
     ///        auditorPub[2],
-    ///        askC1[t].x,askC1[t].y (t=0..36),  askC2[t].x,askC2[t].y,  askSum[t],
-    ///        bidC1[t].x,bidC1[t].y,            bidC2[t].x,bidC2[t].y,  bidSum[t]
-    ///      Total = 2 + 37*10 = 372. Accumulators are read from AuctionHouse so the
-    ///      proof binds to on-chain state.
-    function _buildPublicSignals(uint64 epoch, DepthPoint[] calldata depth) internal view returns (uint256[] memory) {
+    ///        askC1[t].x,askC1[t].y (t = k*10 .. k*10+9),  askC2[t].x,askC2[t].y,  askSum[t],
+    ///        bidC1[t].x,bidC1[t].y,                       bidC2[t].x,bidC2[t].y,  bidSum[t]
+    ///      Total = 2 + 10*10 = 102 per chunk. Accumulators are read from
+    ///      AuctionHouse so each proof binds to on-chain state. Virtual ticks
+    ///      >= TICKS (37..39 in the last chunk) use the identity point (0,1) and
+    ///      sum 0 WITHOUT touching AuctionHouse — the prover pads identically.
+    function _buildChunkSignals(uint64 epoch, DepthPoint[] calldata depth, uint16 k)
+        internal
+        view
+        returns (uint256[] memory)
+    {
         uint16 ticks = auctionHouse.TICKS();
-        uint256[] memory sig = new uint256[](2 + uint256(ticks) * 10);
+        uint16 lo = k * CHUNK_TICKS;
+        uint256[] memory sig = new uint256[](2 + uint256(CHUNK_TICKS) * 10);
         sig[0] = auditorPubX;
         sig[1] = auditorPubY;
         uint256 p = 2;
         uint8 ask = auctionHouse.ASK();
         uint8 bid = auctionHouse.BID();
         // askC1 (x,y) per tick, then askC2, then askSum
-        for (uint16 t = 0; t < ticks; t++) {
-            (EGCT memory a,,) = auctionHouse.getAggregate(epoch, ask, t);
-            sig[p++] = a.c1.x;
-            sig[p++] = a.c1.y;
+        for (uint16 i = 0; i < CHUNK_TICKS; i++) {
+            uint16 t = lo + i;
+            if (t < ticks) {
+                (EGCT memory a,,) = auctionHouse.getAggregate(epoch, ask, t);
+                sig[p++] = a.c1.x;
+                sig[p++] = a.c1.y;
+            } else {
+                sig[p++] = 0;
+                sig[p++] = 1;
+            }
         }
-        for (uint16 t = 0; t < ticks; t++) {
-            (EGCT memory a,,) = auctionHouse.getAggregate(epoch, ask, t);
-            sig[p++] = a.c2.x;
-            sig[p++] = a.c2.y;
+        for (uint16 i = 0; i < CHUNK_TICKS; i++) {
+            uint16 t = lo + i;
+            if (t < ticks) {
+                (EGCT memory a,,) = auctionHouse.getAggregate(epoch, ask, t);
+                sig[p++] = a.c2.x;
+                sig[p++] = a.c2.y;
+            } else {
+                sig[p++] = 0;
+                sig[p++] = 1;
+            }
         }
-        for (uint16 t = 0; t < ticks; t++) {
-            sig[p++] = depth[t].askSum;
+        for (uint16 i = 0; i < CHUNK_TICKS; i++) {
+            uint16 t = lo + i;
+            sig[p++] = t < ticks ? depth[t].askSum : 0;
         }
         // bidC1, bidC2, bidSum
-        for (uint16 t = 0; t < ticks; t++) {
-            (EGCT memory b,,) = auctionHouse.getAggregate(epoch, bid, t);
-            sig[p++] = b.c1.x;
-            sig[p++] = b.c1.y;
+        for (uint16 i = 0; i < CHUNK_TICKS; i++) {
+            uint16 t = lo + i;
+            if (t < ticks) {
+                (EGCT memory b,,) = auctionHouse.getAggregate(epoch, bid, t);
+                sig[p++] = b.c1.x;
+                sig[p++] = b.c1.y;
+            } else {
+                sig[p++] = 0;
+                sig[p++] = 1;
+            }
         }
-        for (uint16 t = 0; t < ticks; t++) {
-            (EGCT memory b,,) = auctionHouse.getAggregate(epoch, bid, t);
-            sig[p++] = b.c2.x;
-            sig[p++] = b.c2.y;
+        for (uint16 i = 0; i < CHUNK_TICKS; i++) {
+            uint16 t = lo + i;
+            if (t < ticks) {
+                (EGCT memory b,,) = auctionHouse.getAggregate(epoch, bid, t);
+                sig[p++] = b.c2.x;
+                sig[p++] = b.c2.y;
+            } else {
+                sig[p++] = 0;
+                sig[p++] = 1;
+            }
         }
-        for (uint16 t = 0; t < ticks; t++) {
-            sig[p++] = depth[t].bidSum;
+        for (uint16 i = 0; i < CHUNK_TICKS; i++) {
+            uint16 t = lo + i;
+            sig[p++] = t < ticks ? depth[t].bidSum : 0;
         }
         return sig;
     }

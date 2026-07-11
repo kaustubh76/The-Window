@@ -28,27 +28,35 @@ const recovered = decryptEGCTDirect(S, agg, 1 << 16);
 if (recovered !== 350n) throw new Error(`decrypt mismatch: got ${recovered}, expected 350`);
 console.log("decryptEGCTDirect(S, Enc(120)+Enc(230)) =", recovered.toString(), "OK");
 
-// 4: build a 37-tick depth (this aggregate at tick 4 ask), prove, verify off-chain
+// 4: build a 37-tick depth (this aggregate at tick 4 ask), prove all 4 chunks,
+//    verify each off-chain against the 102-signal chunk vkey.
 const ID = { c1: { x: 0n, y: 1n }, c2: { x: 0n, y: 1n } };
 const askAgg = [], bidAgg = [], askSum = [], bidSum = [];
 for (let t = 0; t < 37; t++) { askAgg.push(ID); bidAgg.push(ID); askSum.push(0n); bidSum.push(0n); }
 askAgg[4] = agg; askSum[4] = 350n;
 
-const proof = await genDepthArrayProof(BUILD, S, pub, askAgg, bidAgg, askSum, bidSum);
-// re-run fullProve to get raw proof/publicSignals for verify
+const { proofs } = await genDepthArrayProof(BUILD, S, pub, askAgg, bidAgg, askSum, bidSum);
+// re-run fullProve per chunk to get raw proof/publicSignals for snarkjs.verify
 const s = (x) => BigInt(x).toString();
 const pt = (p) => [s(p.x), s(p.y)];
-const input = {
-  auditorPub: [s(pub[0]), s(pub[1])],
-  askC1: askAgg.map((a) => pt(a.c1)), askC2: askAgg.map((a) => pt(a.c2)), askSum: askSum.map(s),
-  bidC1: bidAgg.map((b) => pt(b.c1)), bidC2: bidAgg.map((b) => pt(b.c2)), bidSum: bidSum.map(s),
-  auditorPriv: s(S),
-};
-const { proof: rawProof, publicSignals } = await snarkjs.groth16.fullProve(
-  input, `${BUILD}/depth_pocd_array_js/depth_pocd_array.wasm`, `${BUILD}/depth_array_final.zkey`
-);
+const padAgg = [...askAgg, ID, ID, ID], padBid = [...bidAgg, ID, ID, ID];
+const padASum = [...askSum, 0n, 0n, 0n], padBSum = [...bidSum, 0n, 0n, 0n];
 const vkey = JSON.parse(readFileSync(`${BUILD}/depth_array_vkey.json`, "utf8"));
-const ok = await snarkjs.groth16.verify(vkey, publicSignals, rawProof);
-console.log("array PoCD (auditor scalar S) verify:", ok ? "OK ✅" : "FAILED ❌");
-console.log("formatted proof.a[0]:", proof.a[0].slice(0, 12), "...");
-process.exit(ok && recovered === 350n ? 0 : 1);
+let allOk = true;
+for (let k = 0; k < 4; k++) {
+  const lo = k * 10, hi = lo + 10;
+  const input = {
+    auditorPub: [s(pub[0]), s(pub[1])],
+    askC1: padAgg.slice(lo, hi).map((a) => pt(a.c1)), askC2: padAgg.slice(lo, hi).map((a) => pt(a.c2)), askSum: padASum.slice(lo, hi).map(s),
+    bidC1: padBid.slice(lo, hi).map((b) => pt(b.c1)), bidC2: padBid.slice(lo, hi).map((b) => pt(b.c2)), bidSum: padBSum.slice(lo, hi).map(s),
+    auditorPriv: s(S),
+  };
+  const { proof: rawProof, publicSignals } = await snarkjs.groth16.fullProve(
+    input, `${BUILD}/depth_pocd_array_js/depth_pocd_array.wasm`, `${BUILD}/depth_array_final.zkey`
+  );
+  const ok = await snarkjs.groth16.verify(vkey, publicSignals, rawProof);
+  console.log(`chunk ${k} PoCD (auditor scalar S) verify:`, ok ? "OK ✅" : "FAILED ❌");
+  allOk = allOk && ok;
+}
+console.log("formatted proofs[0].a[0]:", proofs[0].a[0].slice(0, 12), "...");
+process.exit(allOk && recovered === 350n ? 0 : 1);

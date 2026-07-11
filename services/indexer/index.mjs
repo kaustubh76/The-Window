@@ -4,7 +4,7 @@
 import express from "express";
 import cors from "cors";
 import { ethers } from "ethers";
-import { provider, handles } from "../lib/chain.mjs";
+import { provider, handles, queryAll } from "../lib/chain.mjs";
 
 const PORT = Number(process.env.INDEXER_PORT || 8787);
 const NO_TRADE = 65535;
@@ -57,7 +57,7 @@ async function rebuild() {
 
   // prints (decode postPrint calldata for the depth curve — proven by the PoCD)
   state.prints.clear();
-  const printed = await H.oracle.queryFilter(H.oracle.filters.RatePrinted(), 0, "latest");
+  const printed = await queryAll(H.oracle, H.oracle.filters.RatePrinted());
   for (const ev of printed) {
     const epoch = Number(ev.args.epoch);
     const rTick = Number(ev.args.rStarTick);
@@ -87,7 +87,7 @@ async function rebuild() {
     events.push({ type: "RatePrinted", block: ev.blockNumber, print });
   }
   // no-trade epochs (curve didn't cross)
-  for (const ev of await H.oracle.queryFilter(H.oracle.filters.NoTrade(), 0, "latest")) {
+  for (const ev of await queryAll(H.oracle, H.oracle.filters.NoTrade())) {
     const epoch = Number(ev.args.epoch);
     if (!state.prints.has(epoch)) {
       state.prints.set(epoch, { epoch, rStarBps: null, aggVolume: "0", depth: [], pocd: { verified: true }, printedAt: 0, stale: true });
@@ -118,7 +118,7 @@ async function rebuild() {
     ["LoanCreated", H.book.filters.LoanCreated()], ["Funded", H.book.filters.Funded()],
     ["Repaid", H.book.filters.Repaid()], ["Seized", H.book.filters.Seized()],
   ]) {
-    for (const e of await H.book.queryFilter(ev, 0, "latest")) {
+    for (const e of await queryAll(H.book, ev)) {
       events.push({ type: name, block: e.blockNumber, loanId: (e.args.loanId ?? 0n).toString() });
     }
   }
@@ -126,7 +126,7 @@ async function rebuild() {
     ["CollateralLocked", H.vault.filters.Locked()], ["CollateralReleased", H.vault.filters.Released()],
     ["CollateralSeized", H.vault.filters.Seized()],
   ]) {
-    for (const e of await H.vault.queryFilter(ev, 0, "latest")) {
+    for (const e of await queryAll(H.vault, ev)) {
       events.push({ type: name, block: e.blockNumber, loanId: (e.args.loanId ?? 0n).toString() });
     }
   }
@@ -136,7 +136,7 @@ async function rebuild() {
   const bids = {};
   const LOCKED = { c1: ["0", "1"], c2: ["0", "1"] };
   for (const [side, ev] of [["ask", H.auction.filters.AskSubmitted()], ["bid", H.auction.filters.BidSubmitted()]]) {
-    for (const e of await H.auction.queryFilter(ev, 0, "latest")) {
+    for (const e of await queryAll(H.auction, ev)) {
       const who = e.args.who.toLowerCase();
       (bids[who] ||= []).push({
         id: `${e.args.epoch}-${side}-${e.args.tick}-${e.blockNumber}`,
@@ -148,7 +148,7 @@ async function rebuild() {
   state.bids = bids;
 
   // members (from MemberAdded events)
-  const added = await H.registry.queryFilter(H.registry.filters.MemberAdded(), 0, "latest");
+  const added = await queryAll(H.registry, H.registry.filters.MemberAdded());
   state.members = [];
   for (const ev of added) {
     const who = ev.args.who.toLowerCase();

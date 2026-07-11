@@ -30,7 +30,21 @@ async function processEpoch(epoch) {
     const borrower = actorByAddress(L.borrower);
     if (!borrower) { console.warn(`[admin] loan ${id}: unknown borrower ${L.borrower}`); continue; }
     await lockCollateral(borrower.name, id);                       // real solvency proof
-    await (await op.vault.confirmLock(id, ethers.id("ref" + id))).wait(); // operator escrow
+    // operator escrow — the standalone operator service watches for Requested locks
+    // and confirms them from the operator key. Two processes sending from that key
+    // collide on nonces, so WAIT for the operator to confirm (single writer); only
+    // if it never shows up (service not running) confirm ourselves as fallback.
+    let lock = await H.vault.locks(id);
+    for (let w = 0; w < 12 && Number(lock.state) === 1 /*Requested*/; w++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      lock = await H.vault.locks(id);
+    }
+    if (Number(lock.state) === 1) {
+      try { await (await op.vault.confirmLock(id, ethers.id("ref" + id))).wait(); } catch {}
+      lock = await H.vault.locks(id);
+    }
+    if (Number(lock.state) !== 2 /*Locked*/) throw new Error(`loan ${id}: lock never confirmed`);
+    console.log(`[admin] loan ${id}: escrow confirmed`);
     await confirmFunding(ADMIN_PK, id);                            // attested -> Active
     if (i < loans.length - 1) {
       await repay(ADMIN_PK, id);                                   // most repay -> released

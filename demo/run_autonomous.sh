@@ -27,7 +27,7 @@ pkill -f 'anvil' 2>/dev/null || true; pkill -f 'services/' 2>/dev/null || true
 pkill -f 'index.mjs' 2>/dev/null || true; sleep 1
 # --block-time 1: mine a block every second so block.timestamp advances for the
 # time-based keeper (unattended). The scripted demo instead uses evm_increaseTime.
-anvil --silent --block-time 1 --code-size-limit 200000 > /tmp/window_anvil.log 2>&1 &
+anvil --silent --block-time 1 > /tmp/window_anvil.log 2>&1 &
 sleep 4
 bash "$ROOT/scripts/deploy_local.sh" > /tmp/window_deploy.log 2>&1
 node "$ROOT/packages/eerc-node/src/register_all.mjs"

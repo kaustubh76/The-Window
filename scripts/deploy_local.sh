@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Deploy the full WINDOW stack to a local Anvil launched with --code-size-limit.
-# The 372-signal DepthPoCDArrayVerifier (~62KB) exceeds EIP-170, so it is pre-deployed
-# via cast (Anvil accepts it) and referenced by DeployAll through the small adapter.
+# Deploy the full WINDOW stack to a local Anvil (vanilla — no code-size hacks needed:
+# the chunked 102-signal DepthPoCDArrayVerifier is ~18KB, under EIP-170).
 set -euo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,17 +17,12 @@ VAULT_OPERATOR_ADDR="${VAULT_OPERATOR_ADDR:-$(cast wallet address --private-key 
 cd "$ROOT/contracts"
 forge build -q
 
-echo "== pre-deploying array verifier via cast (bypasses forge EIP-170 linker) =="
-BC=$(python3 -c "import json;print(json.load(open('out/DepthPoCDArrayVerifier.sol/DepthPoCDArrayVerifier.json'))['bytecode']['object'])")
-VADDR=$(cast send --private-key "$KEY" --rpc-url "$RPC" --create "$BC" --json | python3 -c "import json,sys;print(json.load(sys.stdin)['contractAddress'])")
-echo "array verifier: $VADDR"
-
 echo "== deploying + wiring WINDOW stack =="
-SNOWTRACE_API_KEY=dummy ADMIN_PK="$KEY" USE_REAL_VERIFIERS=1 DEPTH_ARRAY_VERIFIER_ADDR="$VADDR" \
+SNOWTRACE_API_KEY=dummy ADMIN_PK="$KEY" USE_REAL_VERIFIERS=1 \
   EPOCH_LEN="${EPOCH_LEN:-60}" TENOR_BLOCKS="${TENOR_BLOCKS:-150}" \
   AUDITOR_PUB_X="${AUDITOR_BJJ_PUB_X:-0}" AUDITOR_PUB_Y="${AUDITOR_BJJ_PUB_Y:-0}" \
   KEEPER_ADDR="$KEEPER_ADDR" VAULT_OPERATOR_ADDR="$VAULT_OPERATOR_ADDR" \
-  forge script script/DeployAll.s.sol --rpc-url "$RPC" --broadcast --skip-simulation 2>&1 \
+  forge script script/DeployAll.s.sol --rpc-url "$RPC" --broadcast 2>&1 \
   | grep -iE 'AuctionHouse|MONIAOracle|real verifiers|SUCCESSFUL|Error' || true
 
 echo "== deployments/$(cast chain-id --rpc-url "$RPC").json =="

@@ -39,28 +39,47 @@ export const ARRAY_ART = {
   wasm: `${EERC_CIRCOM}/../depth_pocd_array_js/depth_pocd_array.wasm`, // resolved below
 };
 
-// Generate the 37-tick DepthCurve PoCD proof from ACTUAL on-chain aggregates.
+// Chunking parameters for the DepthCurve PoCD. The 37-tick curve is proven as
+// POCD_CHUNKS proofs of POCD_CHUNK_TICKS ticks each (circuit = DepthPoCDArray(10),
+// 102 public signals/chunk) so the generated verifier fits EIP-170 on real chains.
+// Must match MONIAOracle.CHUNK_TICKS / CHUNKS and the circuit's N.
+export const POCD_CHUNK_TICKS = 10;
+export const POCD_CHUNKS = 4;
+
+// Generate the chunked 37-tick DepthCurve PoCD proofs from ACTUAL on-chain aggregates.
 // askAgg/bidAgg: arrays[37] of {c1:{x,y}, c2:{x,y}} (as read from getAggregate).
 // askSum/bidSum: arrays[37] of bigint (decrypted per-tick sums).
+// Pads virtual ticks 37-39 with the identity point (0,1) and sum 0 — identical to
+// MONIAOracle._buildChunkSignals. Returns { proofs: [{a,b,c,publicSignals} x 4] }.
 export async function genDepthArrayProof(buildDir, auditorPriv, auditorPub, askAgg, bidAgg, askSum, bidSum) {
   const wasm = `${buildDir}/depth_pocd_array_js/depth_pocd_array.wasm`;
   const zkey = `${buildDir}/depth_array_final.zkey`;
   const s = (x) => BigInt(x).toString();
   const pt = (p) => [s(p.x), s(p.y)];
-  const input = {
-    auditorPub: [s(auditorPub[0]), s(auditorPub[1])],
-    askC1: askAgg.map((a) => pt(a.c1)),
-    askC2: askAgg.map((a) => pt(a.c2)),
-    askSum: askSum.map(s),
-    bidC1: bidAgg.map((b) => pt(b.c1)),
-    bidC2: bidAgg.map((b) => pt(b.c2)),
-    bidSum: bidSum.map(s),
-    auditorPriv: s(auditorPriv),
-  };
-  const { proof, publicSignals } = await import("snarkjs").then((sj) =>
-    sj.groth16.fullProve(input, wasm, zkey)
-  );
-  return formatProof(proof, publicSignals);
+  const ID_AGG = { c1: { x: 0n, y: 1n }, c2: { x: 0n, y: 1n } };
+  const padded = POCD_CHUNK_TICKS * POCD_CHUNKS; // 40
+  const padAgg = (arr) => [...arr, ...Array(padded - arr.length).fill(ID_AGG)];
+  const padSum = (arr) => [...arr, ...Array(padded - arr.length).fill(0n)];
+  const [aAgg, bAgg, aSum, bSum] = [padAgg(askAgg), padAgg(bidAgg), padSum(askSum), padSum(bidSum)];
+
+  const sj = await import("snarkjs");
+  const proofs = [];
+  for (let k = 0; k < POCD_CHUNKS; k++) {
+    const lo = k * POCD_CHUNK_TICKS, hi = lo + POCD_CHUNK_TICKS;
+    const input = {
+      auditorPub: [s(auditorPub[0]), s(auditorPub[1])],
+      askC1: aAgg.slice(lo, hi).map((a) => pt(a.c1)),
+      askC2: aAgg.slice(lo, hi).map((a) => pt(a.c2)),
+      askSum: aSum.slice(lo, hi).map(s),
+      bidC1: bAgg.slice(lo, hi).map((b) => pt(b.c1)),
+      bidC2: bAgg.slice(lo, hi).map((b) => pt(b.c2)),
+      bidSum: bSum.slice(lo, hi).map(s),
+      auditorPriv: s(auditorPriv),
+    };
+    const { proof, publicSignals } = await sj.groth16.fullProve(input, wasm, zkey);
+    proofs.push(await formatProof(proof, publicSignals));
+  }
+  return { proofs };
 }
 
 export function randomNonce() {

@@ -2,7 +2,7 @@
 // the Control API. The ONLY plaintext surface. HARD RULE: never log plaintext sizes.
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { handles } from "./chain.mjs";
+import { handles, queryAll } from "./chain.mjs";
 import { AUDITOR } from "./actors.mjs";
 import { decryptEGCTDirect, genDepthArrayProof } from "../../packages/eerc-node/src/eerc.mjs";
 
@@ -41,7 +41,7 @@ export async function decryptDepth(H, epoch) {
   return { askAgg, bidAgg, askSum, bidSum };
 }
 
-// Full print: decrypt -> compute r* -> real 37-tick PoCD -> postPrint. Returns summary.
+// Full print: decrypt -> compute r* -> real chunked PoCD (4 x 10-tick proofs) -> postPrint.
 export async function printEpoch(adminPk, epoch) {
   const H = handles(adminPk);
   if (Number(await H.auction.epochStatus(epoch)) !== 2) throw new Error("epoch not Closed");
@@ -49,9 +49,13 @@ export async function printEpoch(adminPk, epoch) {
   const { crossing, matched, trade } = computeClearing(askSum, bidSum);
   const depth = askSum.map((a, t) => ({ askSum: a, bidSum: bidSum[t] }));
 
-  const proof = await genDepthArrayProof(BUILD, AUDITOR.priv, AUDITOR.pub, askAgg, bidAgg, askSum, bidSum);
+  const { proofs } = await genDepthArrayProof(BUILD, AUDITOR.priv, AUDITOR.pub, askAgg, bidAgg, askSum, bidSum);
   const rStar = trade ? crossing : NO_TRADE;
-  await (await H.oracle.postPrint(epoch, rStar, depth.map((d) => ({ askSum: d.askSum, bidSum: d.bidSum })), proof.a, proof.b, proof.c)).wait();
+  await (await H.oracle.postPrint(
+    epoch, rStar,
+    depth.map((d) => ({ askSum: d.askSum, bidSum: d.bidSum })),
+    proofs.map((p) => ({ a: p.a, b: p.b, c: p.c }))
+  )).wait();
   return { epoch, rStarTick: rStar, rStarBps: trade ? 100 + 25 * crossing : null, matched: matched.toString(), trade };
 }
 
@@ -62,10 +66,10 @@ export async function matchEpoch(adminPk, epoch) {
   if (!exists || Number(rStar) === NO_TRADE) return [];
   const r = Number(rStar);
   const lenders = [], borrowers = [];
-  for (const ev of await H.auction.queryFilter(H.auction.filters.AskSubmitted(epoch), 0, "latest")) {
+  for (const ev of await queryAll(H.auction, H.auction.filters.AskSubmitted(epoch))) {
     if (Number(ev.args.tick) <= r) lenders.push(ev.args.who);
   }
-  for (const ev of await H.auction.queryFilter(H.auction.filters.BidSubmitted(epoch), 0, "latest")) {
+  for (const ev of await queryAll(H.auction, H.auction.filters.BidSubmitted(epoch))) {
     if (Number(ev.args.tick) >= r) borrowers.push(ev.args.who);
   }
   const n = Math.min(lenders.length, borrowers.length);

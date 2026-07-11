@@ -20,17 +20,20 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // COOP/COEP enable SharedArrayBuffer for snarkjs worker-thread proving (live mode).
-    headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
-    },
-    // Proxy to the indexer REST service (live mode). Mock mode ignores this.
+    // No COOP/COEP: proving is server-side now (Control API), so the browser needs no
+    // SharedArrayBuffer/snarkjs — and those headers only complicate cross-origin fetch.
+    // Same-origin proxies to the backend services (used when VITE_{INDEXER,CONTROL}_URL
+    // are set to the proxied paths; the .env may also point at the ports directly).
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:3001',
+        target: 'http://127.0.0.1:8787', // indexer
         changeOrigin: true,
         rewrite: (p: string) => p.replace(/^\/api/, ''),
+      },
+      '/control': {
+        target: 'http://127.0.0.1:8899', // Control API
+        changeOrigin: true,
+        rewrite: (p: string) => p.replace(/^\/control/, ''),
       },
     },
     fs: {

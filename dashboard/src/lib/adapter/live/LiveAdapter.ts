@@ -13,6 +13,38 @@ import { IndexerAPI } from '../../../services/indexer';
 // (real proofs), so the browser holds no keys and needs no eERC SDK / circuit artifacts.
 const LOCKED: Ciphertext = { c1: ['0', '1'], c2: ['0', '1'] };
 
+// The indexer/control serialize on-chain uint256 as decimal STRINGS. Normalize to bigint
+// at the boundary so the store holds honest UsdcMicro (never "string-as-bigint").
+function bi(v: unknown): bigint {
+  if (typeof v === 'bigint') return v;
+  if (v == null) return 0n;
+  try {
+    return BigInt(typeof v === 'number' ? Math.trunc(v) : String(v).split('.')[0] || '0');
+  } catch {
+    return 0n;
+  }
+}
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function mapDepth(d: any): DepthPoint[] {
+  return Array.isArray(d) ? d.map((p) => ({ tick: p.tick, bps: p.bps, supply: bi(p.supply), demand: bi(p.demand) })) : [];
+}
+function mapPrint(p: any): MoniaPrint | null {
+  if (!p) return null;
+  return {
+    epoch: p.epoch,
+    rStarBps: p.rStarBps ?? null,
+    aggVolume: bi(p.aggVolume),
+    depth: mapDepth(p.depth),
+    pocd: p.pocd ?? { verified: false },
+    printedAt: p.printedAt ?? 0,
+    stale: !!p.stale,
+  };
+}
+function normStatus(s: string): EpochStatusLike {
+  return s === 'Open' || s === 'Closed' || s === 'Printed' ? s : 'Open'; // "None" → pre-open
+}
+type EpochStatusLike = EpochClock['status'];
+
 async function ctrl(path: string, body?: unknown, method: 'POST' | 'GET' = 'POST'): Promise<any> {
   const res = await fetch(`${CONTROL_URL}${path}`, {
     method,
@@ -20,7 +52,7 @@ async function ctrl(path: string, body?: unknown, method: 'POST' | 'GET' = 'POST
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = await res.json().catch(() => ({ ok: false, error: `control ${res.status}` }));
-  if (!json.ok) throw new Error(json.error || `control ${path} failed`);
+  if (json && json.ok === false) throw new Error(json.error || `control ${path} failed`);
   return json;
 }
 
@@ -28,12 +60,14 @@ export class LiveAdapter implements WindowAdapter {
   readonly mode = 'live' as const;
   private profile: Profile = PROFILE;
   private actor: Address | null = null; // the selected/connected member address
+  private buffer: WindowEvent[] = []; // recent mapped firehose events (for the Explorer feed)
+  private lastBlock = 0;
 
   async init(): Promise<void> {
     try { await fetch(`${INDEXER_URL}/health`); } catch { /* graceful-empty until up */ }
   }
 
-  /** Called by useControlBridge to reflect the connected wallet / selected persona. */
+  /** Called by useEercBridge to reflect the connected wallet / selected persona. */
   setActor(a: Address | null) { this.actor = a ? (a.toLowerCase() as Address) : null; }
 
   getProfile() { return this.profile; }
@@ -41,22 +75,30 @@ export class LiveAdapter implements WindowAdapter {
 
   // ---- clock ----
   async getEpochClock(): Promise<EpochClock> {
-    try { return (await IndexerAPI.epochClock()) as EpochClock; }
-    catch { return { epoch: 0, status: 'Open', profile: this.profile, openedAt: 0, closesAt: 0, epochLenMs: 0, tenorMs: 0, now: 0 }; }
+    try {
+      const c = (await IndexerAPI.epochClock()) as any;
+      return { ...c, status: normStatus(c.status), profile: c.profile ?? this.profile } as EpochClock;
+    } catch {
+      return { epoch: 0, status: 'Open', profile: this.profile, openedAt: 0, closesAt: 0, epochLenMs: 0, tenorMs: 0, now: 0 };
+    }
   }
   subscribeClock(cb: (c: EpochClock) => void): Unsubscribe {
     const id = setInterval(() => { void this.getEpochClock().then(cb); }, 1000);
     return () => clearInterval(id);
   }
 
-  // ---- public reads (indexer) ----
-  async getLatestMonia(): Promise<MoniaPrint | null> { try { return (await IndexerAPI.latestMonia()) as MoniaPrint; } catch { return null; } }
-  async getMoniaHistory(limit = 40): Promise<MoniaPrint[]> { try { return (await IndexerAPI.moniaHistory(limit)) as MoniaPrint[]; } catch { return []; } }
-  async getDepthCurve(epoch?: EpochId): Promise<DepthPoint[]> { try { return (await IndexerAPI.depth(epoch)) as DepthPoint[]; } catch { return []; } }
+  // ---- public reads (indexer; money normalized to bigint) ----
+  async getLatestMonia(): Promise<MoniaPrint | null> { try { return mapPrint(await IndexerAPI.latestMonia()); } catch { return null; } }
+  async getMoniaHistory(limit = 40): Promise<MoniaPrint[]> {
+    try { return ((await IndexerAPI.moniaHistory(limit)) as any[]).map(mapPrint).filter(Boolean) as MoniaPrint[]; } catch { return []; }
+  }
+  async getDepthCurve(epoch?: EpochId): Promise<DepthPoint[]> { try { return mapDepth(await IndexerAPI.depth(epoch)); } catch { return []; } }
   async getMembers(): Promise<MemberInfo[]> { try { return (await IndexerAPI.members()) as MemberInfo[]; } catch { return []; } }
   async getLoanBook(filter?: { status?: LoanStatus }): Promise<Loan[]> {
-    try { const l = (await IndexerAPI.loans()) as Loan[]; return filter?.status ? l.filter((x) => x.status === filter.status) : l; }
-    catch { return []; }
+    try {
+      const l = ((await IndexerAPI.loans()) as any[]).map((x) => ({ ...x, status: x.status === 'None' ? 'Pending' : x.status })) as Loan[];
+      return filter?.status ? l.filter((x) => x.status === filter.status) : l;
+    } catch { return []; }
   }
   async getRawCiphertexts(epoch: EpochId): Promise<{ side: Side; tick: TickIndex; agg: Ciphertext }[]> {
     try { return (await IndexerAPI.aggregates(epoch)) as { side: Side; tick: TickIndex; agg: Ciphertext }[]; } catch { return []; }
@@ -71,15 +113,15 @@ export class LiveAdapter implements WindowAdapter {
   async getBalances(a: Address): Promise<Balances> {
     const b = await ctrl(`/member/balance/${a}`, undefined, 'GET').catch(() => ({ usdc: '0', registered: false, eercClear: null, eercEncrypted: null }));
     return {
-      usdcErc20: BigInt(b.usdc ?? '0'),
+      usdcErc20: bi(b.usdc),
       registered: !!b.registered,
       eercEncrypted: b.eercEncrypted ?? LOCKED,
-      eercClear: b.eercClear != null ? BigInt(b.eercClear) : undefined,
+      eercClear: b.eercClear != null ? bi(b.eercClear) : undefined,
     };
   }
   async decryptOwnBalance(a: Address): Promise<UsdcMicro> {
     const b = await ctrl(`/member/balance/${a}`, undefined, 'GET');
-    return b.eercClear != null ? BigInt(b.eercClear) : 0n;
+    return b.eercClear != null ? bi(b.eercClear) : 0n;
   }
   async getMyBids(a: Address): Promise<MyBid[]> { try { return (await IndexerAPI.bids(a)) as MyBid[]; } catch { return []; } }
   async getMyLoans(a: Address): Promise<Loan[]> {
@@ -90,9 +132,15 @@ export class LiveAdapter implements WindowAdapter {
   // ---- writes (Control API, real server-side proofs) ----
   private async tx(onP: OnProof | undefined, run: () => Promise<any>): Promise<TxResult> {
     onP?.({ phase: 'proving', label: 'proving (server-side)…' });
-    const r = await run();
-    onP?.({ phase: 'done', label: 'done' });
-    return { ok: true, txHash: r.txHash, proofMs: r.proofMs, gasUsed: r.gasUsed };
+    try {
+      const r = await run();
+      onP?.({ phase: 'done', label: 'confirmed ✓', ms: r.proofMs });
+      return { ok: true, txHash: r.txHash, proofMs: r.proofMs, gasUsed: r.gasUsed };
+    } catch (e) {
+      const error = e instanceof Error ? e.message : 'failed';
+      onP?.({ phase: 'error', label: error });
+      return { ok: false, error };
+    }
   }
   register(a: Address, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/register', { address: a })); }
   faucet(a: Address, amt: UsdcMicro) { return this.tx(undefined, () => ctrl('/member/faucet', { address: a, amount: amt.toString() })); }
@@ -109,38 +157,61 @@ export class LiveAdapter implements WindowAdapter {
   seize(id: LoanId) { return this.tx(undefined, () => ctrl('/keeper/seize', { loanId: Number(id) })); }
 
   // ---- admin (auditor key stays in services/control) ----
-  async adminDecryptAggregates(e: EpochId): Promise<DepthPoint[]> { return (await ctrl(`/admin/decrypt/${e}`, undefined, 'GET')).depth; }
+  async adminDecryptAggregates(e: EpochId): Promise<DepthPoint[]> { return mapDepth((await ctrl(`/admin/decrypt/${e}`, undefined, 'GET')).depth); }
   async adminComputeClearing(e: EpochId): Promise<{ rStarBps: Bps | null; depth: DepthPoint[] }> {
     const c = await ctrl(`/admin/clearing/${e}`, undefined, 'GET');
-    return { rStarBps: c.rStarBps, depth: await this.getDepthCurve(e) };
+    return { rStarBps: c.rStarBps ?? null, depth: await this.adminDecryptAggregates(e).catch(() => []) };
   }
   async adminPostPrint(e: EpochId, onP?: OnProof): Promise<TxResult & { print: MoniaPrint }> {
     onP?.({ phase: 'proving', label: 'admin proving 37-tick PoCD…' });
     const r = await ctrl(`/admin/print/${e}`, {});
-    onP?.({ phase: 'done', label: 'M-ONIA printed' });
-    const print = (await this.getLatestMonia()) as MoniaPrint;
+    onP?.({ phase: 'done', label: 'M-ONIA printed', ms: r.proofMs });
+    // synthesize from the Control response + decrypted depth (avoid racing the 3s indexer rebuild)
+    let depth: DepthPoint[] = [];
+    try { depth = await this.adminDecryptAggregates(e); } catch { /* attested */ }
+    const print: MoniaPrint = {
+      epoch: e,
+      rStarBps: r.rStarBps ?? null,
+      aggVolume: bi(r.matched),
+      depth,
+      pocd: { verified: true, proveMs: r.proofMs },
+      printedAt: Date.now(),
+      stale: r.trade === false,
+    };
     return { ok: true, proofMs: r.proofMs, print };
   }
   async adminPostMatches(e: EpochId): Promise<TxResult & { loans: Loan[] }> {
     await ctrl(`/admin/matches/${e}`, {});
-    return { ok: true, loans: await this.getLoanBook() };
+    return { ok: true, loans: (await this.getLoanBook()).filter((l) => l.epoch === e) };
   }
 
-  // ---- firehose (poll indexer /events) ----
-  private lastBlock = 0;
+  // ---- firehose (poll indexer /events, map to WindowEvents, buffer for the Explorer) ----
+  private mapEvent(e: any): WindowEvent | null {
+    switch (e.type) {
+      case 'RatePrinted': { const p = mapPrint(e.print); return p ? { type: 'RatePrinted', print: p } : null; }
+      case 'LoanCreated': return { type: 'MatchesPosted', epoch: Number(e.epoch ?? 0), count: 1 };
+      case 'Funded': return { type: 'LoanFunded', loanId: String(e.loanId) };
+      case 'Repaid': return { type: 'LoanRepaid', loanId: String(e.loanId) };
+      case 'Seized':
+      case 'CollateralSeized': return { type: 'LoanSeized', loanId: String(e.loanId) };
+      default: return null; // NoTrade / CollateralLocked / Released — reflected via reads
+    }
+  }
   subscribe(cb: (e: WindowEvent) => void): Unsubscribe {
     const id = setInterval(async () => {
       try {
-        const evs = await IndexerAPI.events(this.lastBlock);
-        for (const e of evs as any[]) {
+        const evs = (await IndexerAPI.events(this.lastBlock)) as any[];
+        for (const e of evs) {
           this.lastBlock = Math.max(this.lastBlock, (e.block ?? 0) + 1);
-          if (e.type === 'RatePrinted') cb({ type: 'RatePrinted', print: e.print });
-          else if (e.type === 'Funded') cb({ type: 'LoanFunded', loanId: e.loanId });
-          else cb({ type: 'clock', clock: await this.getEpochClock() } as WindowEvent);
+          const w = this.mapEvent(e);
+          if (!w) continue;
+          this.buffer.push(w);
+          if (this.buffer.length > 60) this.buffer.shift();
+          cb(w);
         }
       } catch { /* indexer down */ }
     }, 2000);
     return () => clearInterval(id);
   }
-  recentEvents(): WindowEvent[] { return []; }
+  recentEvents(): WindowEvent[] { return this.buffer.slice(); }
 }

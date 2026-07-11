@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Phase B: build + prove the 37-tick DepthCurve array PoCD end to end (2^20 ptau).
+# Build + prove the CHUNKED DepthCurve array PoCD end to end (N=10 ticks/chunk, K=4 chunks).
+# The 2^20 ptau is reused (any circuit <= its capacity works); ~151k constraints/chunk.
+# Smoke prove uses chunk 0 of the fixture scenario (see gen_pocd_array_input.mjs).
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(pwd)"
@@ -13,7 +15,7 @@ echo "== 1. compile =="
 circom depth_pocd/depth_pocd_array.circom --r1cs --wasm --sym -o "$B" \
   -l "$ROOT/../contracts/lib/EncryptedERC/circom"
 
-echo "== 2. groth16 setup + contribute (this is heavy: ~540k constraints) =="
+echo "== 2. groth16 setup + contribute (~151k constraints/chunk) =="
 snarkjs groth16 setup "$B/depth_pocd_array.r1cs" "$PTAU" "$B/depth_array_0.zkey"
 snarkjs zkey contribute "$B/depth_array_0.zkey" "$B/depth_array_final.zkey" --name="window-array" -v -e="window array entropy"
 snarkjs zkey export verificationkey "$B/depth_array_final.zkey" "$B/depth_array_vkey.json"

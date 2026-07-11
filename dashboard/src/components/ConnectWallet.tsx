@@ -1,21 +1,9 @@
-import { useAccount, useConnect, useDisconnect } from 'wagmi';
-import { LogOut, Wallet, Loader2, CheckCircle2, CircleDashed } from 'lucide-react';
+import { useAccount, useDisconnect } from 'wagmi';
+import { LogOut, CheckCircle2, CircleDashed } from 'lucide-react';
 import { useSessionStore } from '../stores/useSessionStore';
 import { AddressChip } from './ui/AddressChip';
 import PersonaSwitcher from './PersonaSwitcher';
-import { ADAPTER_MODE } from '../config';
 import type { Address } from '../lib/adapter/types';
-
-function WalletButton() {
-  const { connect, connectors, isPending } = useConnect();
-  const c = connectors[0];
-  return (
-    <button onClick={() => c && connect({ connector: c })} disabled={isPending || !c} className="btn btn-primary flex items-center gap-2">
-      {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wallet className="w-4 h-4" />}
-      {isPending ? 'Connecting…' : 'Connect wallet'}
-    </button>
-  );
-}
 
 export default function ConnectWallet() {
   const { address, label, registered, source, persona, disconnect: sessionDisconnect } = useSessionStore();
@@ -28,7 +16,10 @@ export default function ConnectWallet() {
   };
 
   if (!address) {
-    return ADAPTER_MODE === 'mock' ? <PersonaSwitcher /> : <WalletButton />;
+    // Both modes use the persona/actor picker: mock → DemoEngine personas, live → the
+    // Control API's actor EOAs (a real wallet can't be a Control actor). WalletButton stays
+    // available for the rare case an injected wallet address IS one of the actors.
+    return <PersonaSwitcher />;
   }
 
   const roleLabel = label ?? (persona.includes('admin') ? 'Admin' : persona.includes('keeper') ? 'Keeper' : 'Member');
