@@ -1,0 +1,19 @@
+{
+  "name": "@thewindow/services",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Off-chain services for THE WINDOW: indexer, keeper, admin, agents. Node crypto via @thewindow/eerc-node.",
+  "scripts": {
+    "indexer": "node indexer/index.mjs",
+    "keeper": "node keeper/index.mjs",
+    "admin": "node admin/index.mjs",
+    "agents": "node agents/index.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.0",
+    "express": "^4.19.2"
+  }
+}
