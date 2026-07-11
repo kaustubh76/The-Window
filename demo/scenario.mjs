@@ -40,7 +40,8 @@ const egctObj = (r) => ({ c1: { x: r.c1.x, y: r.c1.y }, c2: { x: r.c2.x, y: r.c2
 const log = (...a) => console.log("»", ...a);
 
 async function advanceAndClose() {
-  await provider.send("evm_increaseTime", [61]);
+  const epochLen = Number(await H.keeper.auction.epochLength()); // honor DEMO/PROD profile
+  await provider.send("evm_increaseTime", [epochLen + 1]);
   await provider.send("evm_mine", []);
   await (await H.keeper.auction.closeEpoch()).wait();
 }

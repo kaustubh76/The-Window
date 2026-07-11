@@ -37,8 +37,11 @@ grep -iE 'MONIAOracle|real verifiers|SUCCESSFUL' /tmp/window_deploy.log || true
 echo "== [3/5] register members + write dashboard/.env =="
 node "$ROOT/packages/eerc-node/src/register_all.mjs"
 
-echo "== [4/5] start indexer =="
+echo "== [4/5] start indexer + control API =="
+pkill -f 'services/control' 2>/dev/null || true
+pkill -f 'control/index.mjs' 2>/dev/null || true
 (cd "$ROOT/services" && node indexer/index.mjs > /tmp/window_indexer.log 2>&1 &)
+(cd "$ROOT/services" && CONTROL_PORT=8899 node control/index.mjs > /tmp/window_control.log 2>&1 &)
 sleep 2
 
 echo "== [5/5] run scripted full-epoch scenario (REAL proofs; ~2 min) =="
