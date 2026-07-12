@@ -18,8 +18,12 @@ export default function Diagnostics() {
   const [auditor, setAuditor] = useState<[string, string] | null>(null);
 
   useEffect(() => {
-    const a = adapter as unknown as { auditorKey?: () => [string, string] } | null;
-    if (a?.auditorKey) setAuditor(a.auditorKey());
+    // mock returns the pair synchronously; live returns a promise (control /auditor)
+    const a = adapter as unknown as { auditorKey?: () => [string, string] | Promise<[string, string] | null> } | null;
+    if (!a?.auditorKey) return;
+    let alive = true;
+    Promise.resolve(a.auditorKey()).then((k) => { if (alive && k) setAuditor(k); }).catch(() => {});
+    return () => { alive = false; };
   }, [adapter]);
 
   const addrRows = Object.entries(ADDRESSES);

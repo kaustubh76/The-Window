@@ -93,9 +93,12 @@ services are down; the private `tx()` helper surfaces `{phase: 'proving', label:
 'proving (server-side)…'}` through `onProof` and returns `proofMs` + `gasUsed` (the
 Control API returns the receipt's gas stringified; `tx()` coerces it to number)
 (LiveAdapter.ts:133-144). `/keeper/open` exists on the Control API but no LiveAdapter
-method calls it (the keeper daemon opens epochs). `src/lib/adapter/live/contracts.ts`
-(viem public client + minimal ERC20/Registrar ABIs for direct Fuji reads) is a leftover
-from the pre-Control-API design and is not used by LiveAdapter's current flow.
+method calls it (the keeper daemon opens epochs). LiveAdapter also implements
+`auditorKey()` (async — fetches the PUBLIC auditor key from control `GET /auditor`) so
+the Diagnostics card renders in live mode; MockAdapter's remains synchronous and
+`Diagnostics.tsx` handles both via `Promise.resolve(...)`. (The dead pre-Control-API
+leftover `src/lib/adapter/live/contracts.ts` was deleted in the submission-hardening
+pass.)
 
 ## MockAdapter — deterministic zero-backend demo
 

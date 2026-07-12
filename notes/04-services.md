@@ -213,6 +213,7 @@ Proof-bearing routes include `proofMs` (wall time of the whole op).
 |---|---|---|
 | `GET /health` | — | — (control:30) |
 | `GET /actors` | — | Lists `{name, address, role}` for all 8 actors (control:31) |
+| `GET /auditor` | — | The auditor **PUBLIC** key `{x, y}` (the PoCD binding target; never the scalar) — feeds the live Diagnostics card (control:33) |
 | `POST /member/register` | `{actor\|address}` | `memberops.registerMember` (control:34) |
 | `POST /member/faucet` | `{actor\|address, amount}` | `memberops.faucet` (control:35) |
 | `POST /member/wrap` | `{actor\|address, amount}` | `memberops.wrap` (control:36) |

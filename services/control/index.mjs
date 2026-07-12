@@ -5,7 +5,7 @@
 import express from "express";
 import cors from "cors";
 import { handles } from "../lib/chain.mjs";
-import { ACTORS, actorByAddress } from "../lib/actors.mjs";
+import { ACTORS, AUDITOR, actorByAddress } from "../lib/actors.mjs";
 import { ADMIN_PK, KEEPER_PK } from "../lib/roles.mjs";
 import * as member from "../lib/memberops.mjs";
 import * as admin from "../lib/adminops.mjs";
@@ -29,6 +29,8 @@ const t0 = () => Date.now();
 
 app.get("/health", (_q, r) => r.json({ ok: true }));
 app.get("/actors", (_q, r) => r.json(Object.values(ACTORS).map((a) => ({ name: a.name, address: a.address, role: a.role }))));
+// the auditor PUBLIC key (the on-chain PoCD binding target) — never the scalar
+app.get("/auditor", (_q, r) => r.json({ ok: true, x: AUDITOR.pub[0].toString(), y: AUDITOR.pub[1].toString() }));
 
 // ---- member ops ----
 app.post("/member/register", async (q, r) => { try { const a = resolveActor(q.body); const s = t0(); ok(r, { ...(await member.registerMember(a)), proofMs: Date.now() - s }); } catch (e) { fail(r, e); } });

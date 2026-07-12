@@ -157,6 +157,10 @@ export class LiveAdapter implements WindowAdapter {
   seize(id: LoanId) { return this.tx(undefined, () => ctrl('/keeper/seize', { loanId: Number(id) })); }
 
   // ---- admin (auditor key stays in services/control) ----
+  // the auditor PUBLIC key, served by control /auditor (Diagnostics card)
+  async auditorKey(): Promise<[string, string] | null> {
+    try { const r = await ctrl('/auditor', undefined, 'GET'); return [String(r.x), String(r.y)]; } catch { return null; }
+  }
   async adminDecryptAggregates(e: EpochId): Promise<DepthPoint[]> { return mapDepth((await ctrl(`/admin/decrypt/${e}`, undefined, 'GET')).depth); }
   async adminComputeClearing(e: EpochId): Promise<{ rStarBps: Bps | null; depth: DepthPoint[] }> {
     const c = await ctrl(`/admin/clearing/${e}`, undefined, 'GET');
