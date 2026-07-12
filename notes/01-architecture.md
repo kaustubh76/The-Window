@@ -122,9 +122,9 @@ Registry with all keys/scalars: `services/lib/actors.mjs` (Anvil defaults, env-o
 `the_window_architecture.excalidraw` at repo root — regenerated 2026-07-11 to match the post-Control-API
 implementation (lanes: Actors | Dashboard | Off-chain services | On-chain; bands: Circuits, Demo/Ops;
 numbered arrows R1–R2 read path, W1–W4 write path, 1–10 autonomous loop, plus internal on-chain and
-artifact wiring). Diagram-sync note: the chunked PoCD (same verifier seam, now 4 proofs per print) and
-the live Fuji deployment postdate that regeneration — the topology is unchanged, but any label reading
-"372 signals" / "single PoCD proof" or implying local-only deployment is stale until the next regen.
-If you change the architecture, regenerate/update the diagram AND this file.
+artifact wiring). Diagram-sync status (verified 2026-07-12): the diagram ALREADY reflects the chunked
+PoCD (4 × 102-signal proofs, 17.9 KB verifier) and the live Fuji deployment; the last two stale labels
+(`run_demo.sh` "code-size 200k", monolith-era `_buildPublicSignals`) were fixed in the pre-submission
+hardening pass. If you change the architecture, regenerate/update the diagram AND this file.
 Note: `Readme.md` §5 still contains the pre-Control-API ASCII diagram (known drift — see
 [07-decisions-and-gotchas](07-decisions-and-gotchas.md)).

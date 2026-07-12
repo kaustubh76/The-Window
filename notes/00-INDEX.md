@@ -1,13 +1,21 @@
 # notes/ — Implementation Documentation Index
 
-Comprehensive, source-verified documentation of THE WINDOW as **implemented** (written 2026-07-11,
-current through the chunked-PoCD + Fuji work following commit `c2200aa`). Use this folder as context
-for future development — every doc cites real file paths and was verified against source, not against
-the original plan.
+Comprehensive, source-verified documentation of THE WINDOW as **implemented** (written 2026-07-11;
+last verified + updated 2026-07-12 in the **pre-submission hardening pass**: a three-agent audit
+cross-checked every doc against source AND probed the live Fuji/Render/Vercel deployment read-only —
+all audit findings were fixed in code/docs the same day). Use this folder as context for future
+development — every doc cites real file paths and was verified against source, not against the
+original plan.
 
-> **The stack is LIVE on Avalanche Fuji (chainId 43113)** — chunked 4×102-signal PoCD verifier
-> (EIP-170-compliant, 17,892 B), addresses in `contracts/deployments/43113.json`, services run via
-> `demo/run_fuji.sh`. See [06-demo-and-ops](06-demo-and-ops.md) → "Fuji deployment".
+> **The stack is LIVE on Avalanche Fuji (chainId 43113) AND hosted publicly.**
+> - On-chain: chunked 4×102-signal PoCD verifier (EIP-170-compliant, 17,892 B), addresses in
+>   `contracts/deployments/43113.json`.
+> - Public app: frontend on **Vercel → https://the-window-five.vercel.app**, `indexer`+`control`
+>   on **Render** (`window-indexer`/`window-control`.onrender.com) from a Docker image; the four
+>   autonomous drivers run on the local Mac via `demo/run_fuji.sh`. See
+>   [08-hosting-and-deployment](08-hosting-and-deployment.md).
+> - The dashboard now shows **real Fuji transactions with Snowtrace links** (a "Live on-chain
+>   activity" feed + per-event/toast tx links), and the sim-agents randomize bids each epoch.
 
 ## The notes
 
@@ -19,7 +27,8 @@ the original plan.
 | [04-services.md](04-services.md) | `services/lib/` (chain/actors/memberops/adminops) + the six runnables. **Full route tables** for Indexer :8787 and Control :8899 with handlers and request bodies. Security/trust model. |
 | [05-dashboard.md](05-dashboard.md) | Adapter pattern, LiveAdapter method→HTTP-route mapping, MockAdapter/DemoEngine, config & TIME_PROFILES, routes + RoleGate, hooks & stores, env plumbing. |
 | [06-demo-and-ops.md](06-demo-and-ops.md) | run_demo.sh vs run_autonomous.sh vs **run_fuji.sh**, scenario.mjs, verify_backend.mjs, smoke_member.mjs, deploy_local.sh (vanilla Anvil — no code-size hacks), **the live Fuji deployment** (fund_fuji.mjs / deploy_fuji.sh / addresses / timing), Makefile targets, PROFILE plumbing, **full env-var reference**, how to run everything. |
-| [07-decisions-and-gotchas.md](07-decisions-and-gotchas.md) | Every non-obvious decision with Why/Where: auditor-attested funding, vault-operator custody, two ElGamal decrypt conventions, 102-signal-per-chunk coupling, on-chain clearing recompute, NonceManager sharing, the **resolved** chunked-PoCD EIP-170 story, doc-drift list. |
+| [07-decisions-and-gotchas.md](07-decisions-and-gotchas.md) | Every non-obvious decision with Why/Where: auditor-attested funding, vault-operator custody, two ElGamal decrypt conventions, 102-signal-per-chunk coupling, on-chain clearing recompute, NonceManager sharing, the **resolved** chunked-PoCD EIP-170 story, **cloud-hosting gotchas (Render/Docker/Vercel)**, doc-drift list. |
+| [08-hosting-and-deployment.md](08-hosting-and-deployment.md) | **Public cloud deployment**: Vercel (prebuilt static frontend) + Render free-tier `indexer`/`control` web services from a Docker Hub image; live URLs + service IDs, the `Dockerfile`/`.dockerignore` design, Render/Vercel config, the **redeploy runbook**, and the free-tier liveliness caveat (drivers on the Mac). |
 
 The architecture diagram at the repo root (`the_window_architecture.excalidraw`) was regenerated
 2026-07-11 to match the post-Control-API implementation — numbered arrows: R1–R2 read path,
@@ -33,14 +42,14 @@ W1–W4 write path, 1–10 autonomous loan loop, plus on-chain internal and circ
 | `ROADMAP.md` | ✅ Current | Out-of-scope list; stable. |
 | `spike/GATE.md` | ⚠️ Mostly current | D2 gate decision (homomorphic accumulation + PoCD validated, no commit-reveal pivot). ⚠️ Reproduce commands reference deleted `gen_pocd_input.mjs`/`elgamal.mjs`; ⚠️ still describes the **372-signal monolithic PoCD** — superseded by the chunked 4×102 design. |
 | `spike/NOTES.md` | ⚠️ Mostly current | Best eERC teardown (ciphertext layout, auditor mechanics, converter quirks). ⚠️ Names deleted `gen_pocd_input.mjs`/`elgamal.mjs`/`decryptPCT` (removed in `8e9db63` — use `userFromRaw`/`genWithdrawProof`/`decryptEGCT*` in `eerc.mjs`); ⚠️ claims dashboard uses `@avalabs/eerc-sdk` v1.0.2 — it is NOT in `dashboard/package.json`; ⚠️ §"EIP-170" (NOTES.md:83-87) still describes the **372-signal monolith + cast pre-deploy + deferred bid/ask-split plan** — resolved by the implemented chunking (see 07). |
-| `Readme.md` | ⚠️ Stale in parts | The original up-front spec — still the best narrative/pitch. ⚠️ §5 ASCII diagram predates the Control-API architecture; §9 says solidity `^0.8.24` (pinned is 0.8.27); §15's EIP-170 mitigation ("split into bid/ask proofs") is superseded by the **implemented** 10-tick chunking; many `[TO-VERIFY]` markers since resolved by `spike/NOTES.md`; no Control API / autonomous runner / two-step lock. |
-| `dashboard/README.md` | ⚠️ Stale write-path | Adapter description is good, but says LiveAdapter writes are "Pending (EercNotReady)" — superseded by `15b508e`: all writes wired through Control API :8899. |
+| `Readme.md` | ✅ Current (2026-07-12) | The original up-front spec + narrative/pitch, refreshed in the hardening pass: new §0 **LIVE DEPLOYMENT** (Fuji addresses + Snowtrace links + hosted URLs), §5 diagram marked superseded → points at notes/01, §9 notes the 0.8.27 pin, §15 records the implemented chunking outcome, every `[TO-VERIFY]` resolved inline. |
+| `dashboard/README.md` | ✅ Current (2026-07-12) | LiveAdapter section rewritten: all writes via Control API (real proofs server-side, txHash+gasUsed back), no-silent-mock-fallback stated, hosted-app note added. |
 
 Full drift details (with line numbers) live in [07-decisions-and-gotchas.md](07-decisions-and-gotchas.md).
 
 ## Quick orientation for a new session
 
 1. Read [01-architecture.md](01-architecture.md) first (5 min).
-2. Touching contracts/circuits → 02 + 03. Touching services/API → 04. Touching UI → 05. Running things → 06.
+2. Touching contracts/circuits → 02 + 03. Touching services/API → 04. Touching UI → 05. Running things locally → 06. **Deploying / the hosted app → 08.**
 3. Before changing anything non-obvious, scan [07-decisions-and-gotchas.md](07-decisions-and-gotchas.md) — several couplings (signal ordering, decrypt conventions, nonce management) break silently.
 4. Keep this folder honest: if you change the architecture, update the affected note, the excalidraw diagram, and 01.

@@ -109,7 +109,7 @@ bps, i.e. 1.00%–10.00% in 25 bps steps), `ASK = 0` (lenders, min acceptable ra
 | Variable | Type | Notes |
 |---|---|---|
 | `Status` enum | `None, Open, Closed, Printed` | per-epoch lifecycle (`:20-25`) |
-| `epochLength` | `uint256 immutable` | seconds; DEMO=60, PROD=3600 (`:33`) |
+| `epochLength` | `uint256 immutable` | seconds; DEMO=60, PROD=3600 (`:33`); **live Fuji = 120** (deploy_fuji.sh default — see the parameter-sets note under Deployment wiring) |
 | `keeper` | `address` | epoch lifecycle authority (`:34`) |
 | `oracle` | `address` | set once by `setOracle` (`:35`) |
 | `currentEpoch` | `uint64` | monotonically incremented (`:37`) |
@@ -275,7 +275,7 @@ Active ──seize(ANYONE, block.number > deadlineBlock) → vault.seizeTo(loanI
 
 | Variable | Type | Notes |
 |---|---|---|
-| `oracle` / `vault` / `admin` / `tenorBlocks` | immutables | `tenorBlocks`: DEMO 150 (~5 min), PROD 10800 (`script/DeployAll.s.sol:42`) |
+| `oracle` / `vault` / `admin` / `tenorBlocks` | immutables | `tenorBlocks`: DEMO 150 (~5 min), PROD 10800 (`script/DeployAll.s.sol:39`); **live Fuji = 60** (deploy_fuji.sh default) |
 | `loans` | `mapping(uint256 => Loan{lender, borrower, epoch, rateTick, EGCT cSize, deadlineBlock, state})` | (`:25-33`) |
 | `nextLoanId` | `uint256` | sequential ids assigned in `postMatches` |
 | `activeLoanCount` | `uint256` | ++ on fund, -- on repay/seize |
@@ -320,6 +320,12 @@ with a **dynamic** input array, implemented by mocks and adapters alike.
 - **Env inputs** (`DeployAll.s.sol:34-42`): `ADMIN_PK` (required), `KEEPER_ADDR` /
   `VAULT_OPERATOR_ADDR` (default: admin), **`EPOCH_LEN`** (default 60; PROD 3600),
   **`TENOR_BLOCKS`** (default 150; PROD ~10800), `AUDITOR_PUB_X/Y` (default 0),
+  **⚠️ three parameter sets exist** — DEMO (60 s / 150 blocks, `DeployAll` defaults),
+  PROD (3600 s / 10800 blocks), and **the LIVE Fuji stack: `EPOCH_LEN=120`,
+  `TENOR_BLOCKS=60`** (defaults baked into `scripts/deploy_fuji.sh:31-32` and
+  `demo/run_fuji.sh:21` so epochs outlast ~40 s chunked-PoCD proving + real
+  confirmations; confirmed in the 43113 broadcast constructor args and on-chain
+  `epochLength()`/`tenorBlocks()`),
   `USE_REAL_VERIFIERS` (1 ⇒ real Groth16, else MockVerifier for both seams). The old
   `DEPTH_ARRAY_VERIFIER_ADDR` env var is **gone** — the chunked 102-signal verifier
   (~18 KB) fits EIP-170 and is deployed inline:

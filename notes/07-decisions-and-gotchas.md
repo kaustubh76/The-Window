@@ -21,6 +21,7 @@ in `02-contracts.md`, circuits in `03-circuits-and-proving.md`, services in
 - [Indexer has no persistence — by design](#indexer-has-no-persistence--by-design)
 - [One NonceManager per key](#one-noncemanager-per-key)
 - [Honest-claim guardrail + leak budget](#honest-claim-guardrail--leak-budget)
+- [Cloud hosting gotchas (Render / Docker / Vercel)](#cloud-hosting-gotchas-render--docker--vercel)
 - [KNOWN DOC DRIFT (to eventually fix)](#known-doc-drift-to-eventually-fix)
 
 ---
@@ -79,7 +80,8 @@ each chunk's public-signal vector embeds its *own* accumulator slice — tested 
 both at the adapter level (`DepthPoCDArrayGate.t.sol` `test_CrossChunkProofFails`) and
 through `postPrint` (`MONIAOracleArrayIntegration.t.sol` `test_SwappedChunkProofsRevert`).
 
-**Cost**: proving is ~30s for all 4 chunks (was ~40s for the monolith); the full
+**Cost**: proving is ~30 s for all 4 chunks measured locally — `run_fuji.sh:21`
+budgets ~40 s of epoch headroom for it (was ~40 s for the monolith); the full
 `postPrint` runs at ~5.0M gas in the integration test (4 × Groth16 verify ≈ 860k each
 + storage) vs ~4.1M for the old single proof — same order. Verified e2e on a vanilla
 Anvil (`deploy_local.sh` + `register_all` + `demo/verify_backend.mjs` → PASS, both
@@ -330,44 +332,78 @@ ANY copy or docs, keep to this budget.
 **Where**: METHODOLOGY.md:32-49, dashboard/src/lib/honestClaims.ts,
 services/lib/adminops.mjs:1-2.
 
-## KNOWN DOC DRIFT (to eventually fix)
+## Cloud hosting gotchas (Render / Docker / Vercel)
+
+Footguns hit while hosting the stack publicly (see [08-hosting-and-deployment.md](08-hosting-and-deployment.md)
+for the full setup). All discovered the hard way.
+
+1. **Render `dockerCommand` is naively tokenized — no `sh -c`.** A start command of
+   `sh -c 'INDEXER_PORT=$PORT node …'` fails at boot with **exit 127** (Render splits the
+   string on whitespace and mis-parses the quotes). **Fix**: use a plain exec command
+   (`node services/indexer/index.mjs`) and set the port via a **static env var**
+   `INDEXER_PORT`/`CONTROL_PORT=10000` (= Render's default `$PORT`) — you can't expand
+   `$PORT` inside the command.
+2. **Must cross-build `--platform linux/amd64`.** The Mac is arm64; an arm64 image won't run
+   on Render (amd64). `docker buildx build --platform linux/amd64 … --push`. Verify with
+   `docker buildx imagetools inspect <img>` before deploying.
+3. **Gitignored runtime files must be baked into the image.** `contracts/out` ABIs,
+   `contracts/deployments/43113.json`, and the `circuits/build/*` zkeys+wasm are gitignored,
+   so Render can't build the backend from a git clone. The `Dockerfile` uses **selective
+   `COPY`** to bake exactly the ~110 MB of runtime artifacts (not the 1.5 GB `circuits/build`).
+   Tunneling the local services (cloudflared) was considered and **rejected** in favor of this
+   durable, Mac-independent hosting. `RPC_LOCAL` (not `RPC_FUJI`) is the var `chain.mjs` reads.
+4. **Vercel: deploy the prebuilt static `dist`, not a source-build.** Building locally with
+   `dashboard/.env.production` bakes the Render URLs deterministically; uploading source and
+   letting Vercel build risks the `.env.production` not being uploaded (it matches `.env.*`).
+   The SPA rewrite must **exclude real assets**: `/((?!assets/|window.svg).*) -> /index.html`.
+5. **Free-tier liveliness.** Render free tier has **no always-on workers**, so the four
+   autonomous drivers run on the local Mac (`demo/run_fuji.sh`). The hosted site is always
+   *up* (serves Fuji state), but the auction only *advances* while the Mac drivers run. Free
+   web services also cold-start (~30–60 s) after 15 min idle.
+6. **Agent randomization is deterministic, not RNG.** `agentBids(epoch)` jitters bids via
+   `keccak256("window:bid:"+epoch+":"+salt)`, **not** `Math.random` — reproducible for a
+   given epoch (and safe if this ever runs where `Math.random` is unavailable).
+
+## KNOWN DOC DRIFT
 
 Docs that lag the code. The code and this notes/ set win.
 
-1. **Readme.md §9 says "Solidity ^0.8.24"** (Readme.md:187) but the toolchain is pinned
-   to **0.8.27** (contracts/foundry.toml:8, per the eERC submodule's pragma —
-   spike/NOTES.md:3). Source pragmas are `^0.8.24` (compatible), but the compiled
-   version is 0.8.27.
-2. **Readme.md stale `[TO-VERIFY]` markers** (Readme.md:14, 42, 53, 83, 149, 193, 199)
-   were all resolved by the D1 teardown: auditor rotation IS supported
-   (spike/NOTES.md:37), the funding hook is the `PrivateTransfer` +
-   auditor-attestation pattern (spike/NOTES.md:45), contracts canNOT hold eERC
-   balances → vault-operator EOA (METHODOLOGY.md:48).
-3. **Readme.md §5 ASCII diagram** (Readme.md:89-110) predates the Control API
-   architecture — it shows an "eERC TS SDK" client layer and no control service. The
-   real write path is dashboard → Control API (:8899) → services/lib ops
-   (see `04-services.md`).
-4. **dashboard/README.md says LiveAdapter writes are "Pending (`EercNotReady`)"**
-   (dashboard/README.md:39-43) — stale: commit 15b508e ("LiveAdapter -> Control API
-   (all writes wired)") wired all writes through the Control API.
-5. **spike/NOTES.md references deleted modules**: `elgamal.mjs` and `decryptPCT`
+**Still drifted — deliberately kept (spike/ is a historical decision record; do not
+rewrite it, read it with these caveats):**
+
+1. **spike/NOTES.md references deleted modules**: `elgamal.mjs` and `decryptPCT`
    (spike/NOTES.md:81, :101) and — same drift in **spike/GATE.md** — `gen_pocd_input.mjs`
    (GATE.md:24) and `elgamal.mjs` (GATE.md:33). All removed in commit 8e9db63; replaced
    by `userFromRaw` / `genWithdrawProof` / `decryptEGCT(Direct)` in
    `packages/eerc-node/src/eerc.mjs`.
-6. **spike/NOTES.md:101 + dashboard/.env.example claim the dashboard uses
-   `@avalabs/eerc-sdk` v1.0.2** — `dashboard/package.json` has no such dependency; the
-   browser never got the SDK. Live writes go via the Control API (commit 15b508e);
-   browser-side crypto is the circomlibjs ElGamal port in the mock adapter.
-7. **spike/NOTES.md + spike/GATE.md still describe the 372-signal monolithic PoCD and
+2. **spike/NOTES.md:101 claims the dashboard uses `@avalabs/eerc-sdk` v1.0.2** —
+   `dashboard/package.json` has no such dependency; the browser never got the SDK.
+   Live writes go via the Control API (commit 15b508e); browser-side crypto is the
+   circomlibjs ElGamal port in the mock adapter.
+3. **spike/NOTES.md + spike/GATE.md still describe the 372-signal monolithic PoCD and
    the cast pre-deploy** (over-EIP-170 verifier, `anvil --code-size-limit`,
    `DEPTH_ARRAY_VERIFIER_ADDR`, the "split into bid/ask proofs" deferred plan,
    spike/NOTES.md:83-87) — all superseded by the **implemented** chunked design (4 ×
    102-signal proofs, 17,892-byte verifier, deploys inline, live on Fuji). See the
    resolved EIP-170 entry above.
-8. **Readme.md §15's EIP-170 mitigation ("split into bid/ask proofs, 2 × 187
-   signals")** is superseded — the shipped fix is 10-tick two-sided chunking (4 × 102
-   signals), not a bid/ask split.
-9. Trivial: `demo/run_autonomous.sh:2-3` header says "operator + operator" (duplicated
-   word); the script starts six distinct services. `demo/run_demo.sh:25`'s step echo
-   still says "raised code limit" although the anvil launch no longer raises it.
+
+**Fixed in the pre-submission hardening pass (2026-07-12)** — kept here so the history
+of the audit is legible:
+
+- Readme.md refreshed: §0 live-deployment section added; §5 diagram marked superseded
+  (Control-API pointer); §9 notes the 0.8.27 toolchain pin; §15 records the implemented
+  chunking outcome; all seven `[TO-VERIFY]` markers resolved inline.
+- dashboard/README.md: LiveAdapter "writes Pending (EercNotReady)" replaced with the
+  real Control-API write path + no-silent-mock-fallback statement; the deleted
+  `elgamal.mjs` reference now points at `eerc.mjs`.
+- dashboard/.env.example: "@avalabs/eerc-sdk writes" wording replaced (Control API);
+  `VITE_CONTROL_URL` added to the template.
+- Root `.env.example`: added the hard-required Fuji vars (`WALLET_PRIVATE_KEY`,
+  `AGENT4_PK`/`AGENT5_PK`) + `CHAIN_ID`, `START_BLOCK`, `KEEPER_STALL_S`,
+  `RENDER_API_KEY`; stale `BABYJUBJUB_ADDR` → `REGISTRAR_ADDR`.
+- Script comments: `run_autonomous.sh` "operator + operator" header and
+  `run_demo.sh:2` "raised code limit" leftover removed.
+- Code (also redeployed): indexer LoanCreated/Funded/Repaid/Seized firehose entries
+  now carry the real `epoch` (previously the dashboard's `MatchesPosted` always showed
+  epoch 0); all Control API write routes return receipt `gasUsed` (previously a dead
+  `undefined` read in `LiveAdapter.tx()`).

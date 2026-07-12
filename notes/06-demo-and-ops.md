@@ -31,7 +31,7 @@ PoCD / EIP-170 history, auditor conventions, doc drift) are consolidated in
 |---|---|---|---|
 | Chain | fresh vanilla Anvil `--silent` (run_demo.sh:30) — **no `--code-size-limit` anymore**: the chunked PoCD verifier fits EIP-170 | fresh vanilla Anvil `--silent --block-time 1` (run_autonomous.sh:30) | **Avalanche Fuji** — no anvil at all; requires a prior `deploy_fuji.sh` (run_fuji.sh:25) |
 | Time model | script-driven `evm_increaseTime` + `evm_mine` / `anvil_mine` | real interval mining (1 block/s) so `block.timestamp` advances on its own | real chain time (~2s blocks) |
-| Services started | indexer + control only (run_demo.sh:43-44) | ALL SIX: indexer, control, keeper, agents, operator, admin (run_autonomous.sh:37-42) | ALL SIX, against Fuji (run_fuji.sh:41-46) |
+| Services started | indexer + control only (run_demo.sh:43-44) | ALL SIX: indexer, control, keeper, agents, operator, admin (run_autonomous.sh:37-42) | ALL SIX, against Fuji (run_fuji.sh:42-47) |
 | Market driver | `demo/scenario.mjs` (run_demo.sh:48) | none — the daemons drive everything | none — the daemons drive everything |
 | EPOCH_LEN / TENOR_BLOCKS | 60 / 10 (run_demo.sh:11) | 10 / 5 (run_autonomous.sh:10) | 120 / 60 defaults (run_fuji.sh:22) |
 
@@ -47,8 +47,8 @@ One-command local demo (also `make demo`). Pipeline (run_demo.sh:25-48):
 1. **`[1/5]` fresh Anvil** — kill old anvil/indexer, then plain `anvil --silent`
    (run_demo.sh:30). The old `--code-size-limit 200000` flag is **gone**: the chunked
    102-signal `DepthPoCDArrayVerifier` is 17,892 bytes, under EIP-170 (see
-   `07-decisions-and-gotchas.md`). (The step's echo string still says "raised code
-   limit" — cosmetic leftover, run_demo.sh:25.)
+   `07-decisions-and-gotchas.md`). (The stale "raised code limit" header comment has
+   been removed from the script.)
 2. **`[2/5]` deploy** — `bash scripts/deploy_local.sh` (run_demo.sh:34), output to
    `/tmp/window_deploy.log`.
 3. **`[3/5]` register** — `node packages/eerc-node/src/register_all.mjs`
@@ -200,6 +200,11 @@ THE WINDOW is **deployed and running on Avalanche Fuji** — made possible by th
 PoCD verifier fitting EIP-170 (real networks enforce it; the monolith never could
 deploy there). Three scripts, run in this order:
 
+> This section covers the **on-chain** deploy + the local service stack. For the **public
+> cloud hosting** (Vercel frontend + Render `indexer`/`control`), see
+> [08-hosting-and-deployment.md](08-hosting-and-deployment.md). These three scripts are the
+> one-time prerequisites before hosting.
+
 ### 1. `scripts/fund_fuji.mjs` — gas-fund the actors
 
 Idempotent funding of all **8 actor EOAs** from the faucet wallet
@@ -236,15 +241,19 @@ var services actually read** — chain.mjs:14), `CHAIN_ID=43113`, `PROFILE=DEMO`
 daemons (run_fuji.sh:19-23). Guards: `deployments/43113.json` must exist, all 8 actor
 PKs + `AUDITOR_BJJ_PRIV` must be set, and every actor must have a nonzero AVAX balance
 (run_fuji.sh:25-36). Then starts **all six services** against Fuji, logging to
-`/tmp/window_fuji_*.log` (run_fuji.sh:41-47; watch `tail -f /tmp/window_fuji_admin.log`).
+`/tmp/window_fuji_*.log` (run_fuji.sh:42-47; watch `tail -f /tmp/window_fuji_admin.log`).
 
-Live status: the keeper opened epoch 1 and the agents bid successfully on Fuji (live as
-of this writing, 2026-07-11).
+Live status (verified on-chain 2026-07-12): the stack has been cycling autonomously for
+40+ epochs — 10 loans created, multiple trade prints with on-chain-verified PoCDs
+(~4.46M gas each), and the FULL lifecycle exercised on the real chain, including
+repayments and a default → keeper seize (loan 5 is `Defaulted` on-chain). Keeper nonce
+180+, admin 85+. Freshness is easy to re-check: `/health.lastBlock` vs Fuji head, and
+the newest `/events` entry should be minutes old while `run_fuji.sh` drivers are up.
 
 ### Fuji timing notes
 
-- **`EPOCH_LEN=120`** — the epoch window must outlast chunked-PoCD proving (~30s for
-  the 4 chunks) plus real transaction confirmations (comment at run_fuji.sh:21).
+- **`EPOCH_LEN=120`** — the epoch window must outlast chunked-PoCD proving (~40s for
+  the 4 chunks, comment at run_fuji.sh:21) plus real transaction confirmations.
 - **`TENOR_BLOCKS=60`** — Fuji's ~2s blocks make that a ~2-minute loan tenor; there is
   no `anvil_mine` shortcut, defaults must be real-time-sized.
 - **`KEEPER_STALL_S=300`** — the stall-guard needs headroom for slow prints before the
@@ -315,13 +324,16 @@ Verified target list (Makefile:2-46):
 
 ### Root `.env.example` (template) and root `.env` (gitignored, real values)
 
-From `.env.example` (all names verified) plus the **Fuji additions** now set in the
-real root `.env`. Since the Fuji deployment, root `.env` is a **Fuji-first config**:
-the vars marked ✦ are set, and notably `RPC_LOCAL` now points at the **Fuji RPC** (it
-is the var services read — chain.mjs:14) with `CHAIN_ID=43113`, `EPOCH_LEN=120`,
-`TENOR_BLOCKS=60`, `KEEPER_STALL_S=300`. The local demo scripts are unaffected: they
-export their own values explicitly (run_demo.sh/run_autonomous.sh override, and
-`deploy_local.sh` never sources `.env`).
+`.env.example` now carries **every** var the Fuji runbook hard-requires (a fresh
+`cp .env.example .env` + fill-in gets past all script guards — `WALLET_PRIVATE_KEY`,
+`AGENT4_PK`/`AGENT5_PK`, `CHAIN_ID`, `START_BLOCK`, `KEEPER_STALL_S` were added to the
+template in the pre-submission hardening pass). Since the Fuji deployment, root `.env`
+is a **Fuji-first config**: the vars marked ✦ are set, and notably `RPC_LOCAL` now
+points at the **Fuji RPC** (it is the var services read — chain.mjs:21) with
+`CHAIN_ID=43113`, `START_BLOCK=56937681`, `EPOCH_LEN=120`, `TENOR_BLOCKS=60`,
+`KEEPER_STALL_S=300`. The local demo scripts are unaffected: they export their own
+values explicitly (run_demo.sh/run_autonomous.sh override, and `deploy_local.sh` never
+sources `.env`).
 
 | Var | Meaning | Notes |
 |---|---|---|
@@ -330,9 +342,11 @@ export their own values explicitly (run_demo.sh/run_autonomous.sh override, and
 | `TENOR_BLOCKS` ✦ | loan tenor in blocks | DeployAll default 150; **root `.env` = 60 (Fuji, ~2s blocks)**; demo 10 (scripted) / 5 (autonomous) |
 | `CONTROL_PORT` | Control API port | code default 8899 (services/control/index.mjs:15) |
 | `INDEXER_PORT` | indexer port | code default 8787 (services/indexer/index.mjs:9) |
-| `RPC_LOCAL` ✦ | the RPC **services actually read** (chain.mjs:14) | code default `http://127.0.0.1:8545`; **root `.env` now sets it to the Fuji RPC** |
+| `RPC_LOCAL` ✦ | the RPC **services actually read** (chain.mjs:21) | code default `http://127.0.0.1:8545`; **root `.env` now sets it to the Fuji RPC** |
 | `RPC_FUJI` ✦ | `https://api.avax-test.network/ext/bc/C/rpc` | consumed by `fund_fuji.mjs`, `deploy_fuji.sh`, `run_fuji.sh` |
-| `CHAIN_ID` ✦ | chain id services use to pick `deployments/<id>.json` | code default 31337 (chain.mjs:15); **root `.env` = 43113** |
+| `CHAIN_ID` ✦ | chain id services use to pick `deployments/<id>.json` | code default 31337 (chain.mjs:22); **root `.env` = 43113** |
+| `START_BLOCK` ✦ | earliest block `queryAll` scans (chain.mjs:27) | code default 0; **root `.env` = 56937681 (the Fuji deploy block)** — REQUIRED on Fuji or every rebuild pages from genesis |
+| `LOG_WINDOW` | `queryAll` pagination window (chain.mjs:28) | code default 2000 (Fuji caps `eth_getLogs` at 2048 blocks) |
 | `CHAIN_ID_FUJI` ✦ | `43113` | legacy/informational; scripts export `CHAIN_ID` directly |
 | `SNOWTRACE_API_KEY` | optional, contract verification | deploy scripts pass `dummy` |
 | `LENDER1_PK` `LENDER2_PK` `BORROWER_PK` ✦ | member EOAs (secret — names only) | Fuji throwaways in root `.env`; demo scripts override with Anvil defaults #3/#4/#5 |
@@ -347,8 +361,9 @@ export their own values explicitly (run_demo.sh/run_autonomous.sh override, and
 | `TESTUSDC_ADDR` … `LOAN_BOOK_ADDR` (commented) | deployed addresses | authoritative source is `contracts/deployments/<chainid>.json`, not env |
 
 Service-tuning vars not in `.env.example` but read by code:
-`KEEPER_POLL_MS`, `ADMIN_POLL_MS`, `AGENTS_POLL_MS`, `OPERATOR_POLL_MS`, `BLOCK_SEC`
-(indexer display estimate, indexer/index.mjs:17).
+`KEEPER_POLL_MS`, `ADMIN_POLL_MS`, `AGENTS_POLL_MS`, `OPERATOR_POLL_MS`, `LOG_WINDOW`,
+`BLOCK_SEC` (indexer display estimate, indexer/index.mjs:17). Ops-only:
+`RENDER_API_KEY` (Render redeploys — see [08](08-hosting-and-deployment.md)).
 
 ### Dashboard `VITE_*` vars
 

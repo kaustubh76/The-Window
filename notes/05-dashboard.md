@@ -60,38 +60,39 @@ Verified method → route map:
 
 | Adapter method | HTTP call | Source line |
 |---|---|---|
-| `getEpochClock` / `subscribeClock` (1 s poll) | `GET {INDEXER}/epoch/clock` | 43-50 |
-| `getLatestMonia` | `GET {INDEXER}/monia/latest` | 53 |
-| `getMoniaHistory(limit=40)` | `GET {INDEXER}/monia/history?limit=` | 54 |
-| `getDepthCurve(epoch?)` | `GET {INDEXER}/depth?epoch=` | 55 |
-| `getMembers` | `GET {INDEXER}/members` | 56 |
-| `getLoanBook(filter?)` | `GET {INDEXER}/loans` (+ client-side status filter) | 57-60 |
-| `getRawCiphertexts(epoch)` | `GET {INDEXER}/aggregates/:epoch` | 61-63 |
-| `getSession` / `getBalances` / `decryptOwnBalance` | `GET {CONTROL}/member/balance/:addr` | 66-83 |
-| `getMyBids(a)` | `GET {INDEXER}/bids?address=` | 84 |
-| `getMyLoans(a)` | derived from `getLoanBook()` (lender/borrower match) | 85-88 |
-| `register(a)` | `POST {CONTROL}/member/register` `{address}` | 97 |
-| `faucet(a, amt)` | `POST {CONTROL}/member/faucet` `{address, amount}` | 98 |
-| `wrap(a, amt)` | `POST {CONTROL}/member/wrap` `{address, amount}` | 99 |
-| `unwrap(a, amt)` | `POST {CONTROL}/member/unwrap` `{address, amount}` | 100 |
-| `submitAsk(a, tick, size)` | `POST {CONTROL}/member/bid` `{address, side: 0, tick, size}` | 101 |
-| `submitBid(a, tick, size)` | `POST {CONTROL}/member/bid` `{address, side: 1, tick, size}` | 102 |
-| `lockCollateral(id, _amt)` | `POST {CONTROL}/member/lock` `{loanId}` (amount ignored — server uses demo coll/loan defaults) | 103 |
-| `fund(id)` | `POST {CONTROL}/member/fund` `{loanId}` | 104 |
-| `repay(id)` | `POST {CONTROL}/member/repay` `{loanId}` | 105 |
-| `closeEpoch(_e)` | `POST {CONTROL}/keeper/close` `{}` | 108 |
-| `seize(id)` | `POST {CONTROL}/keeper/seize` `{loanId}` | 109 |
-| `adminDecryptAggregates(e)` | `GET {CONTROL}/admin/decrypt/:epoch` | 112 |
-| `adminComputeClearing(e)` | `GET {CONTROL}/admin/clearing/:epoch` (+ depth via indexer) | 113-116 |
-| `adminPostPrint(e)` | `POST {CONTROL}/admin/print/:epoch` then re-reads `/monia/latest` | 117-123 |
-| `adminPostMatches(e)` | `POST {CONTROL}/admin/matches/:epoch` then re-reads `/loans` | 124-127 |
-| `subscribe(cb)` | polls `GET {INDEXER}/events?since=` every 2 s, maps `RatePrinted`/`Funded` to typed events | 130-144 |
+| `getEpochClock` / `subscribeClock` (1 s poll) | `GET {INDEXER}/epoch/clock` | 77-89 |
+| `getLatestMonia` | `GET {INDEXER}/monia/latest` | 91 |
+| `getMoniaHistory(limit=40)` | `GET {INDEXER}/monia/history?limit=` | 92-94 |
+| `getDepthCurve(epoch?)` | `GET {INDEXER}/depth?epoch=` | 95 |
+| `getMembers` | `GET {INDEXER}/members` | 96 |
+| `getLoanBook(filter?)` | `GET {INDEXER}/loans` (+ client-side status filter) | 97-101 |
+| `getRawCiphertexts(epoch)` | `GET {INDEXER}/aggregates/:epoch` | 103-106 |
+| `getSession` / `getBalances` / `decryptOwnBalance` | `GET {CONTROL}/member/balance/:addr` | 108-125 |
+| `getMyBids(a)` | `GET {INDEXER}/bids?address=` | 126 |
+| `getMyLoans(a)` | derived from `getLoanBook()` (lender/borrower match) | 127-130 |
+| `register(a)` | `POST {CONTROL}/member/register` `{address}` | 145 |
+| `faucet(a, amt)` | `POST {CONTROL}/member/faucet` `{address, amount}` | 146 |
+| `wrap(a, amt)` | `POST {CONTROL}/member/wrap` `{address, amount}` | 147 |
+| `unwrap(a, amt)` | `POST {CONTROL}/member/unwrap` `{address, amount}` | 148 |
+| `submitAsk(a, tick, size)` | `POST {CONTROL}/member/bid` `{address, side: 0, tick, size}` | 149 |
+| `submitBid(a, tick, size)` | `POST {CONTROL}/member/bid` `{address, side: 1, tick, size}` | 150 |
+| `lockCollateral(id, _amt)` | `POST {CONTROL}/member/lock` `{loanId}` (amount ignored — server uses demo coll/loan defaults) | 151 |
+| `fund(id)` | `POST {CONTROL}/member/fund` `{loanId}` | 152 |
+| `repay(id)` | `POST {CONTROL}/member/repay` `{loanId}` | 153 |
+| `closeEpoch(_e)` | `POST {CONTROL}/keeper/close` `{}` | 156 |
+| `seize(id)` | `POST {CONTROL}/keeper/seize` `{loanId}` | 157 |
+| `adminDecryptAggregates(e)` | `GET {CONTROL}/admin/decrypt/:epoch` | 160 |
+| `adminComputeClearing(e)` | `GET {CONTROL}/admin/clearing/:epoch` (+ depth via `adminDecryptAggregates`) | 161-164 |
+| `adminPostPrint(e)` | `POST {CONTROL}/admin/print/:epoch`, then `GET {CONTROL}/admin/decrypt/:epoch` and **synthesizes the `MoniaPrint` locally** — deliberately does NOT re-read `/monia/latest` (avoids racing the indexer's 3 s rebuild) | 165-182 |
+| `adminPostMatches(e)` | `POST {CONTROL}/admin/matches/:epoch` then re-reads `/loans` | 183-186 |
+| `subscribe(cb)` | polls `GET {INDEXER}/events?since=` every 2 s; `mapEvent` maps `BidSubmitted`, `EpochOpened`, `EpochClosed`, `RatePrinted`, `LoanCreated`→`MatchesPosted` (real `epoch`, joined by the indexer from the loan record), `Funded`, `Repaid`, `Seized`/`CollateralSeized`→`LoanSeized` | 189-221 |
 
 Other notes: `setActor(a)` is called by `useEercBridge` to reflect the connected
-wallet/persona (LiveAdapter.ts:37); all reads degrade gracefully (empty/null) when
+wallet/persona (LiveAdapter.ts:71); all reads degrade gracefully (empty/null) when
 services are down; the private `tx()` helper surfaces `{phase: 'proving', label:
-'proving (server-side)…'}` through `onProof` and returns `proofMs` from the Control API
-(LiveAdapter.ts:91-96). `/keeper/open` exists on the Control API but no LiveAdapter
+'proving (server-side)…'}` through `onProof` and returns `proofMs` + `gasUsed` (the
+Control API returns the receipt's gas stringified; `tx()` coerces it to number)
+(LiveAdapter.ts:133-144). `/keeper/open` exists on the Control API but no LiveAdapter
 method calls it (the keeper daemon opens epochs). `src/lib/adapter/live/contracts.ts`
 (viem public client + minimal ERC20/Registrar ABIs for direct Fuji reads) is a leftover
 from the pre-Control-API design and is not used by LiveAdapter's current flow.
@@ -139,7 +140,11 @@ deterministic simulation:
 - Min bid (micro-USDC): DEMO 1 USDC, PROD 10 USDC (config.ts:40-43).
 - Chain wiring (config.ts:49-56): `CHAIN_ID` (default 43113 Fuji), `RPC_FUJI`,
   `RPC_LOCAL`, **`INDEXER_URL`** (default `/api`), **`CONTROL_URL`** (default
-  `http://127.0.0.1:8899`), `SNOWTRACE_URL`.
+  `http://127.0.0.1:8899`), `SNOWTRACE_URL` (default `https://testnet.snowtrace.io`). In the
+  hosted build `INDEXER_URL`/`CONTROL_URL` point at the Render services (see [08](08-hosting-and-deployment.md)).
+- `SNOWTRACE_URL` + the link builders `EXPLORER_TX(hash, base)` / `EXPLORER_ADDR(addr, base)`
+  (`src/constants/ui.ts`) — **previously defined but unused; now wired** into the tx feed +
+  toasts (`76a52d5`, see "On-chain tx surfacing" below).
 - `ADDRESSES` — the 8 deployed contract addresses from `VITE_*_ADDR` (config.ts:59-68).
 - **`ADMIN_ADDR` / `KEEPER_ADDR`** (config.ts:71-72) — persona gating: in
   `useSessionStore.personaFor(addr)`, a connected address equal to `ADMIN_ADDR` gets
@@ -181,6 +186,28 @@ All in `src/hooks/`, one-liners verified against source headers:
 - **`useWalletSync`** — syncs the wagmi connection into `useSessionStore` (`source='wallet'`), coexisting with mock PersonaSwitcher selections (`source='persona'`).
 - (Also present, not adapter-related: `useAnimatedNumber`, `useCopyToClipboard`, `useKeyboardShortcuts`.)
 
+## On-chain tx surfacing + live tx feed (`76a52d5`)
+
+Real Fuji transactions are now shown throughout the UI with clickable Snowtrace links:
+
+- **`components/ui/TxLink.tsx`** — a compact `↗ tx` link (`EXPLORER_TX(hash, SNOWTRACE_URL)`);
+  renders nothing when there's no hash (mock events / missing tx).
+- **`components/ui/LiveTxFeed.tsx`** — a prominent "Live on-chain activity" card mounted on
+  `MarketHome` (home page). Reuses `useEventFeed()`, filters to events that carry a `txHash`,
+  shows a one-line label per event + a `TxLink`. This is the main "liveliness" surface.
+- **`WindowEvent` (`lib/adapter/types.ts`)** — the on-chain variants now intersect a
+  `TxMeta { txHash?: Hex; block?: number }`, and a new **`EpochOpened`** variant was added.
+  `Loan` gained `createdTx?: Hex | null`.
+- **`LiveAdapter.mapEvent`** threads `e.txHash`/`e.block` through and now maps `BidSubmitted`,
+  `EpochOpened`, `EpochClosed` (previously dropped). `getLoanBook` spreads `createdTx` straight
+  from the indexer.
+- **`Explorer.tsx`** rows each render a per-event `TxLink`.
+- **`contexts/ToastContext.tsx`** — `success(message, txHash?)` / `showToast(message, type, txHash?)`
+  gained an optional `txHash`; when present the toast shows a "View tx …" Snowtrace link. All
+  `useTx` callers pass `res.txHash`: `WalletPage` (register/faucet/wrap/unwrap), `AuctionPage`
+  (bid), `AdminConsole` (print), `KeeperConsole` (close/seize), `LoanCard` (lock/fund/repay).
+  This works because the Control API now returns `txHash` (see [04](04-services.md)).
+
 ## Zustand stores
 
 All in `src/stores/`:
@@ -212,6 +239,10 @@ VITE_ADMIN_ADDR / VITE_KEEPER_ADDR
 
 So after a fresh local deploy the dashboard boots straight into live mode with correct
 addresses and persona gating — don't hand-edit `.env`, it gets overwritten.
+
+**`dashboard/.env.production`** (gitignored, hand-maintained) is the **Vercel build** env —
+Vite loads it in `build` mode. Same `VITE_*` keys, but `VITE_INDEXER_URL`/`VITE_CONTROL_URL`
+point at the **Render** services instead of localhost. See [08](08-hosting-and-deployment.md).
 
 ## Stale README warning
 

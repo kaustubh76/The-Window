@@ -32,15 +32,29 @@ addresses are described in `02-contracts.md`; how the stack is launched end-to-e
 
 ### chain.mjs
 
-`services/lib/chain.mjs` — provider, wallets, and contract handles.
+`services/lib/chain.mjs` — provider, wallets, contract handles, **and the Fuji
+hardening layer** (everything that lets the services survive a real public RPC).
 
-- `RPC = process.env.RPC_LOCAL || "http://127.0.0.1:8545"`, `CHAIN_ID = process.env.CHAIN_ID || 31337` (chain.mjs:14-15).
-- `provider` — a single shared `ethers.JsonRpcProvider(RPC)` (chain.mjs:16).
+- `RPC = process.env.RPC_LOCAL || "http://127.0.0.1:8545"`, `CHAIN_ID = process.env.CHAIN_ID || 31337` (chain.mjs:21-22).
+- `provider` — a single shared `ethers.JsonRpcProvider(RPC)` (chain.mjs:23).
+- **Fuji hardening (load-bearing on real networks — do not remove):**
+  - **`queryAll(contract, filter, from)`** (chain.mjs:33-42) — a `queryFilter` that
+    paginates in `LOG_WINDOW`-block windows (env, default 2000; chain.mjs:28) because
+    public RPCs cap `eth_getLogs` ranges (Fuji: 2048 blocks). On local chains it
+    collapses to a single call. Every service reads logs through this, never raw
+    `queryFilter`.
+  - **`START_BLOCK`** (env, chain.mjs:27) — earliest block worth scanning. MUST be the
+    deployment block on real networks (live Fuji: 56937681) or every indexer rebuild
+    pages from genesis.
+  - A global **`unhandledRejection` handler** (chain.mjs:14-16): public Fuji RPCs
+    intermittently 500 inside ethers' internal polling, outside any caller's
+    try/catch; the handler logs and keeps the process alive (every service loop is
+    idempotent and retries on its next poll).
 - ABIs come from the Foundry build output: `abi(name, sol)` reads
-  `contracts/out/<sol>.sol/<name>.json` (chain.mjs:22-24). Addresses come from
-  `deployments()` which reads `contracts/deployments/<CHAIN_ID>.json` (chain.mjs:18-20).
-- `wallet(pk)` wraps the wallet in an `ethers.NonceManager` (chain.mjs:26-28).
-- **`handles(signerPk)`** (chain.mjs:39-59) is the key primitive: it returns a **cached
+  `contracts/out/<sol>.sol/<name>.json` (chain.mjs:48-50). Addresses come from
+  `deployments()` which reads `contracts/deployments/<CHAIN_ID>.json` (chain.mjs:44-46).
+- `wallet(pk)` wraps the wallet in an `ethers.NonceManager` (chain.mjs:52-54).
+- **`handles(signerPk)`** (chain.mjs:66-85) is the key primitive: it returns a **cached
   bundle of all 8 contract handles** — `usdc` (SimpleERC20 at `TESTUSDC_ADDR`), `eerc`
   (EncryptedERC), `registrar` (Registrar), `registry` (MemberRegistry), `auction`
   (AuctionHouse), `oracle` (MONIAOracle), `vault` (CollateralVault), `book` (LoanBook) —
@@ -63,15 +77,22 @@ addresses are described in `02-contracts.md`; how the stack is launched end-to-e
   always be re-decrypted without storing key material.
 - `ACTORS` (name → `{name, pk, address, bjjRaw, role}`), `BY_ADDRESS`, and
   `actorByAddress(addr)` for reverse lookup (actors.mjs:29-46).
-- **`AGENTS`** — the scripted bid book, five entries (actors.mjs:49-55):
+- **`AGENTS`** — the *base* bid book, five entries (actors.mjs:49-55):
   `lender1` ask tick 6 size 400, `lender2` ask tick 8 size 500, `borrower` bid tick 30
   size 350 ("desperate borrower"), `agent4` bid tick 12 size 300, `agent5` bid tick 16
   size 120 ("noise trader"). `side: 0` = ask/lend, `side: 1` = bid/borrow.
+- **`agentBids(epoch)`** (added `76a52d5`) — returns the `AGENTS` list with **per-epoch
+  jitter** so the auction looks different every round (r*, matched-loan count, and which
+  loan defaults all vary). Ticks jitter ±3 (asks) / ±5 (bids), sizes ±150, clamped
+  (asks stay low, borrowers high → the book still crosses most epochs). The jitter is
+  **epoch-seeded via keccak** (`seeded(epoch, salt)`), NOT `Math.random` — so it's
+  deterministic/reproducible for a given epoch, just not constant. `agents/index.mjs` now
+  iterates `agentBids(epoch)` instead of the raw `AGENTS`.
 - `MEMBER_NAMES` — the five on-chain members (everyone but admin/keeper/operator)
-  (actors.mjs:58).
+  (actors.mjs:79).
 - **`AUDITOR`** — the auction auditor BabyJubJub keypair: `priv` from
   `AUDITOR_BJJ_PRIV` and `pub` `[x, y]` from `AUDITOR_BJJ_PUB_X/Y`, with hard-coded demo
-  defaults (actors.mjs:60-66). Every encrypted bid is encrypted to this key.
+  defaults (actors.mjs:81-87). Every encrypted bid is encrypted to this key.
 
 ### roles.mjs
 
@@ -99,6 +120,13 @@ Note the decryption asymmetry: `memberops` only ever decrypts a member's **own**
 with that member's key. Decrypting *other people's* ciphertexts (the per-tick bid
 aggregates) happens only in `adminops`.
 
+**txHash + gasUsed returns:** every write op above captures the receipt and returns
+`txHash` **and `gasUsed`** in its result object
+(`const tx = await …; const rc = await tx.wait(); return { …, txHash: tx.hash, gasUsed: rc.gasUsed.toString() }`)
+— e.g. `faucet`→`{minted, txHash, gasUsed}`, `submitBid`→`{side, tick, submitted, txHash, gasUsed}`,
+`wrap`/`unwrap`/`registerMember`/`lockCollateral` likewise. The frontend surfaces these as
+Snowtrace links + a real gas figure in the success toast (see [05](05-dashboard.md)).
+
 ### adminops.mjs — the ONLY plaintext surface
 
 `services/lib/adminops.mjs` — admin (auditor-key) operations, used by both the autonomous
@@ -112,9 +140,12 @@ plaintext bid sizes.
 |---|---|
 | `decryptDepth(H, epoch)` | For all 37 ticks, reads `auction.getAggregate(epoch, ASK/BID, t)` and decrypts each aggregate EGCT under the auditor key (BSGS bound `1<<20`). Returns `{askAgg, bidAgg, askSum, bidSum}` (adminops.mjs:30-42). |
 | `computeClearing(askSum, bidSum)` | **JS mirror of `MONIAOracle._computeClearing`** — must agree with the on-chain algorithm or `postPrint` reverts (adminops.mjs:16-27). Walks ticks low→high accumulating supply against remaining demand; returns `{crossing, matched, trade}` with `NO_TRADE = 65535` (adminops.mjs:11). |
-| `printEpoch(adminPk, epoch)` | Full print: require epoch `Closed` (status 2) → `decryptDepth` → `computeClearing` → real **chunked** PoCD (`genDepthArrayProof` under the auditor key returns `{proofs: [{a,b,c,publicSignals} × 4]}`, ~30s) → `oracle.postPrint(epoch, rStar, depth, proofs.map(p => ({a, b, c})))` — the new `Groth16Proof[4]` signature (adminops.mjs:52-58). The HTTP surface (`POST /admin/print/:epoch`) and return shape `{epoch, rStarTick, rStarBps (= 100 + 25*crossing), matched, trade}` are **unchanged** (adminops.mjs:45-60). |
+| `printEpoch(adminPk, epoch)` | Full print: require epoch `Closed` (status 2) → `decryptDepth` → `computeClearing` → real **chunked** PoCD (`genDepthArrayProof` under the auditor key returns `{proofs: [{a,b,c,publicSignals} × 4]}`, ~40 s budgeted — see `run_fuji.sh:21`) → `oracle.postPrint(epoch, rStar, depth, proofs.map(p => ({a, b, c})))` — the new `Groth16Proof[4]` signature (adminops.mjs:52-58). The HTTP surface (`POST /admin/print/:epoch`) and return shape `{epoch, rStarTick, rStarBps (= 100 + 25*crossing), matched, trade}` are **unchanged** (adminops.mjs:45-60). |
 | `matchEpoch(adminPk, epoch)` | Reads `oracle.rateAt(epoch)`; if a trade exists, collects lenders from `AskSubmitted` events with `tick <= r*` and borrowers from `BidSubmitted` with `tick >= r*`, pairs them index-wise, posts `book.postMatches(epoch, ms)` with a zero cSize placeholder, returns the created loan ids (`nextLoanId` before + n) (adminops.mjs:63-83). |
 | `confirmFunding(adminPk, loanId)` / `repay(adminPk, loanId)` | Auditor-attested `book.confirmFunding` / `book.repay` with a 32-byte zero attestation blob (`LoanBook` is `onlyAdmin` for these) (adminops.mjs:86-93). |
+
+`printEpoch`, `confirmFunding`, and `repay` also return `txHash` + `gasUsed`; `matchEpoch`
+still returns the loan-id array (unchanged). The autonomous admin loop ignores these extra fields.
 
 ---
 
@@ -137,30 +168,37 @@ persistence, re-derives everything from chain on boot + poll"* (indexer:1-3). Po
 `INDEXER_PORT` default **8787** (indexer:9). Responses are shaped to the dashboard's
 frozen adapter types (`dashboard/src/lib/adapter/types.ts`); see `05-dashboard.md`.
 
-`rebuild()` (indexer:32-166) re-derives: epoch clock (`currentEpoch`, `epochStatus`,
+`rebuild()` re-derives: epoch clock (`currentEpoch`, `epochStatus`,
 `epochStart`, `epochLength`), prints (decoding the `postPrint` **calldata** of each
-`RatePrinted` tx to recover the proven depth curve, indexer:60-88, plus `NoTrade` epochs
-as stale prints, indexer:90-96), all loans from `book.loans(id)` (indexer:99-115), a
-~200-event firehose from LoanBook/Vault events (indexer:117-133), per-member bids from
+`RatePrinted` tx to recover the proven depth curve, plus `NoTrade` epochs as stale prints),
+all loans from `book.loans(id)`, a ~200-event firehose, per-member bids from
 `AskSubmitted`/`BidSubmitted` events — **who + tick only; size stays the LOCKED
-ciphertext placeholder** (indexer:136-148) — and members from `MemberAdded` events
-(indexer:151-163). `deadlineAt` is estimated with `BLOCK_SEC` (env, default 2)
-(indexer:17, 112). Rate ticks map to bps as `100 + 25*tick` (indexer:11).
+ciphertext placeholder** — and members from `MemberAdded` events. `deadlineAt` is estimated
+with `BLOCK_SEC` (env, default 2). Rate ticks map to bps as `100 + 25*tick`.
+
+**txHash + richer firehose (added `76a52d5`):** every firehose entry now carries
+`txHash` (`e.transactionHash`) and `block`, and the firehose additionally indexes
+**`EpochOpened`, `EpochClosed`, and `BidSubmitted`** (bids are now in the global feed, not
+only `/bids`). Loans gained a **`createdTx`** field (from a `LoanCreated`→txHash map), and
+`/bids` entries gained `txHash`. Implementation note: because `BidSubmitted` is pushed in
+the bids loop, the `state.events = events.sort(...).slice(-200)` assignment was moved to
+**after** that loop. These hashes drive the dashboard's live tx feed + Snowtrace links
+(see [05](05-dashboard.md)); `RatePrinted` already carried `pocd.txHash` before.
 
 Route table (all GET):
 
 | Route | Response |
 |---|---|
-| `/health` | `{ok: true, lastBlock}` (indexer:171) |
-| `/epoch/clock` | Current epoch clock `{epoch, status, openedAt, closesAt, epochLenMs}` **plus `profile: process.env.PROFILE \|\| "DEMO"`, `tenorMs` (tenorBlocks × BLOCK_SEC × 1000), and chain `now` in ms** (indexer:173-178) |
-| `/events?since=<block>` | Firehose entries `{type, block, …}` with `block >= since`; types: `RatePrinted` (carries `print`), `NoTrade`, `LoanCreated`, `Funded`, `Repaid`, `Seized`, `CollateralLocked/Released/Seized` (indexer:180-183) |
-| `/bids?address=<addr>` | That address's bids: `{id, epoch, side: 'ask'\|'bid', tick, bps, size: LOCKED, status: 'submitted'}[]` (indexer:185-188) |
-| `/monia/latest` | Most recent `MoniaPrint` `{epoch, rStarBps\|null, aggVolume, depth[{tick,bps,supply,demand}], pocd:{verified,txHash}, printedAt, stale}` or `null` (indexer:191-194) |
-| `/monia/history?limit=<n>` | Last `limit` (default 40) prints ascending by epoch (indexer:196-200) |
-| `/depth?epoch=<e>` | The depth array of that print (default: latest printed epoch), `[]` if none (indexer:202-208) |
-| `/loans` | All loans `{id, epoch, lender, borrower, rateBps, size(ciphertext), deadlineBlock, deadlineAt, status: None/Pending/Active/Repaid/Defaulted}` (indexer:210, 30) |
-| `/members` | `{address, simulated: true, active, joinedEpoch, roles: ['public']}[]` (indexer:211) |
-| `/aggregates/:epoch` | Raw per-side/tick aggregate ciphertexts for the explorer split-screen — **no plaintext**: 74 rows `{side, tick, agg: {c1:[x,y], c2:[x,y]}}` (indexer:214-226) |
+| `/health` | `{ok: true, lastBlock}` (indexer:195) |
+| `/epoch/clock` | Current epoch clock `{epoch, status, openedAt, closesAt, epochLenMs}` **plus `profile: process.env.PROFILE \|\| "DEMO"`, `tenorMs` (tenorBlocks × BLOCK_SEC × 1000), and chain `now` in ms** (indexer:197-202) |
+| `/events?since=<block>` | Firehose entries `{type, block, txHash, …}` with `block >= since`; types: `RatePrinted` (carries `print`), `NoTrade`, `EpochOpened`, `EpochClosed`, `BidSubmitted` (`{side, tick, who}`), `LoanCreated`, `Funded`, `Repaid`, `Seized` (each carrying `loanId` **and `epoch`, joined from the loan record**), `CollateralLocked/Released/Seized`. Every entry has a real Fuji `txHash`. |
+| `/bids?address=<addr>` | That address's bids: `{id, epoch, side: 'ask'\|'bid', tick, bps, size: LOCKED, status: 'submitted', txHash}[]` |
+| `/monia/latest` | Most recent `MoniaPrint` `{epoch, rStarBps\|null, aggVolume, depth[{tick,bps,supply,demand}], pocd:{verified,txHash}, printedAt, stale}` or `null` (indexer:215-218) |
+| `/monia/history?limit=<n>` | Last `limit` (default 40) prints ascending by epoch (indexer:220-224) |
+| `/depth?epoch=<e>` | The depth array of that print (default: latest printed epoch), `[]` if none (indexer:226-232) |
+| `/loans` | All loans `{id, epoch, lender, borrower, rateBps, size(ciphertext), deadlineBlock, deadlineAt, createdTx, status: None/Pending/Active/Repaid/Defaulted}` — `createdTx` is the `LoanCreated` tx hash |
+| `/members` | `{address, simulated: true, active, joinedEpoch, roles: ['public']}[]` (indexer:235) |
+| `/aggregates/:epoch` | Raw per-side/tick aggregate ciphertexts for the explorer split-screen — **no plaintext**: 74 rows `{side, tick, agg: {c1:[x,y], c2:[x,y]}}` (indexer:238-250) |
 
 ### control (:8899)
 
@@ -194,6 +232,14 @@ Proof-bearing routes include `proofMs` (wall time of the whole op).
 
 Note the comment at control:41: fund/repay are auditor-attested (`LoanBook` `onlyAdmin`);
 the operator service confirms the vault lock first.
+
+**txHash + gasUsed in responses:** the write routes return the on-chain `txHash` **and
+the receipt's `gasUsed` (stringified)** in their `{ok:true, …}` payload — the
+member/admin routes pass both through from `memberops`/`adminops`, and the inline keeper
+routes (`/keeper/open|close|seize`) capture the receipt directly. `/admin/matches` still
+returns only `{loans:[ids]}` (no single hash). The dashboard's `LiveAdapter.tx()` reads
+`r.txHash`/`r.gasUsed` (coercing gas to number), so user actions surface a "View tx"
+Snowtrace link + real gas figure in the success toast (see [05](05-dashboard.md)).
 
 ### keeper
 
@@ -231,13 +277,19 @@ handled (a `handled` set, retried on error, admin:44-58), `processEpoch` (admin:
 1. `printEpoch` — decrypt, clear, real chunked PoCD (4 × 10-tick proofs), `postPrint`.
 2. If a trade: `matchEpoch` — post matches, get loan ids.
 3. Per loan: `lockCollateral(borrower, id)` (real solvency proof, via memberops) →
-   `op.vault.confirmLock(id, ethers.id("ref"+id))` **as the operator directly**
-   (admin:33) → `confirmFunding(ADMIN_PK, id)` (loan becomes Active) → **repay every
-   loan except the last** (`repay-most`), leaving the final one to default so the keeper
-   seizes it past deadline (admin:35-40).
+   **wait for the standalone operator service to confirm the lock** — the admin polls
+   `vault.locks(id)` up to 12 × 5 s while the lock is `Requested` (admin:37-41); two
+   processes sending from `OPERATOR_PK` would collide on nonces, so the operator
+   service is the **single writer** for confirmations. Only if the operator never
+   shows up (service not running) does the admin self-confirm as a fallback
+   (`op.vault.confirmLock(id, ethers.id("ref"+id))`, admin:42-45; hard error if the
+   lock still isn't `Locked`, admin:46) → `confirmFunding(ADMIN_PK, id)` (loan becomes
+   Active) → **repay every loan except the last** (`repay-most`), leaving the final one
+   to default so the keeper seizes it past deadline (admin:49-54).
 
 So the autonomous stack cycles complete loan lifecycles unattended, including a default →
-seize each matched epoch.
+seize each matched epoch — with the operator service as the primary lock-confirmer in
+BOTH the autonomous and dashboard-driven paths.
 
 ### operator
 
@@ -245,11 +297,12 @@ seize each matched epoch.
 `OPERATOR_POLL_MS` (default 3000). For each loan id `< book.nextLoanId()`, reads
 `vault.locks(id)` and when **`lock.state === 1` (Requested)** — i.e. a member locked
 collateral with a valid solvency proof — calls
-`vault.confirmLock(id, ethers.id("op-ref-"+id))` (operator:14-27). This is the
-**dashboard-driven path**; per the header comment (operator:3-4) *and verified in
-`services/admin/index.mjs:33`*, the autonomous admin orchestrator also confirms locks
-directly with `OPERATOR_PK`, so the operator service is only load-bearing when a human
-drives the lock from the dashboard.
+`vault.confirmLock(id, ethers.id("op-ref-"+id))` (operator:14-27). The operator service
+is the **primary confirmer in every path**: the autonomous admin deliberately WAITS for
+it (up to 12 × 5 s) rather than confirming in parallel — a second process sending from
+`OPERATOR_PK` would desync the NonceManager — and only self-confirms as a fallback when
+the operator service isn't running (admin:33-46). Dashboard-driven locks are likewise
+picked up by this service's poll.
 
 ---
 
@@ -282,6 +335,7 @@ Env var summary (all read in the files cited above):
 | Var | Used by | Default |
 |---|---|---|
 | `RPC_LOCAL`, `CHAIN_ID` | chain.mjs | `http://127.0.0.1:8545`, `31337` |
+| `START_BLOCK`, `LOG_WINDOW` | chain.mjs (`queryAll` pagination) | `0`, `2000` — set `START_BLOCK` to the deploy block on Fuji (56937681) |
 | `INDEXER_PORT`, `BLOCK_SEC`, `PROFILE` | indexer | `8787`, `2`, `DEMO` |
 | `CONTROL_PORT` | control | `8899` |
 | `KEEPER_PK` (required), `KEEPER_POLL_MS`, `KEEPER_STALL_S` | keeper | —, `3000`, `120` |
