@@ -113,7 +113,7 @@ Two disclosed trusted surfaces (eERC's `PrivateTransfer` carries no plaintext am
 - **eERC (Encrypted ERC), converter mode** — deep integration, not SDK-surface: we tore down the protocol (`spike/NOTES.md`), regenerate Solidity verifiers from the exact zkeys, drive registration/deposit/withdraw with our own server-side prover (`packages/eerc-node`: snarkjs + the protocol's own crypto libraries), and use the **auditor-key mechanism** as the benchmark administrator role.
 - **Homomorphic accumulation of eERC ciphertexts by an external contract** — validated on-chain before building (the D2 gate: ~13k gas per encrypted add).
 - **Avalanche Fuji C-Chain** — full stack deployed + running autonomously; every UI event deep-links to **Snowtrace**.
-- **Permissioned Avalanche L1** — [see roadmap slide: membership-gated L1 where `MemberRegistry` drives the transaction allowlist].
+- **Permissioned Avalanche L1 — BOTH event technologies, implemented.** A sovereign L1 (`thewindowl1`, Subnet-EVM via `avalanche-cli`) where **market membership IS chain access**: a keeper syncs the `TxAllowList` precompile from `MemberRegistry` events — non-members cannot send a transaction at all. Full stack + encrypted auction runs on it (`demo/run_l1.sh`).
 - Two custom **circom/Groth16** circuits with regenerated on-chain verifiers.
 
 ---
@@ -142,7 +142,7 @@ Two disclosed trusted surfaces (eERC's `PrivateTransfer` carries no plaintext am
 
 ## Roadmap
 
-- **Permissioned L1** — `avalanche-cli` L1 where the **TxAllowList precompile is synced from MemberRegistry**: non-members cannot transact at the chain level. *(Status: see live demo / repo — implemented during the Speedrun window.)*
+- **Permissioned L1 on public validators** — the local sovereign L1 (✅ shipped: `thewindowl1`, TxAllowList synced from MemberRegistry, full market running) redeployed to Fuji-anchored validators for an always-on membership-gated chain.
 - **Threshold auditor** — replace the single auditor key with MPC/threshold decryption so no single party holds plaintext power.
 - **Term tenors + tradeable positions** — beyond overnight; secondary market for loan positions.
 - **Production benchmark ops** — auditor key rotation ceremony, durable indexer, HA services.

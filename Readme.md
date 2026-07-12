@@ -29,6 +29,8 @@ The full stack is deployed and running autonomously on the real Fuji testnet —
 
 Machine-readable: [`contracts/deployments/43113.json`](contracts/deployments/43113.json); deployment tx provenance (20 txs, blocks 56,937,681–716): `contracts/broadcast/DeployAll.s.sol/43113/run-latest.json`. Live Fuji parameters: `EPOCH_LEN=120` s, `TENOR_BLOCKS=60` (see `notes/06`).
 
+**Bonus track — permissioned L1 (implemented):** the full stack also runs on a sovereign Avalanche L1 (`thewindowl1`, chainId 43117, Subnet-EVM) where **MemberRegistry membership IS chain access** — a keeper syncs the `TxAllowList` precompile from membership events, so non-members cannot transact at all. Reproduce with `avalanche-cli` + [`demo/run_l1.sh`](demo/run_l1.sh); design + verified run in [`notes/09-permissioned-l1.md`](notes/09-permissioned-l1.md).
+
 ---
 
 ## 1. Non-negotiable rules for the coding agent
@@ -263,7 +265,7 @@ E2E: a scripted full epoch on Anvil (mock verifiers behind an interface so e2e r
 
 **Indexer + dashboard:** listen to `RatePrinted`, loan lifecycle events → REST → React dashboard with (a) M-ONIA ticker (big number, hourly/60s ticks, sparkline), (b) aggregate depth curve chart, (c) **explorer split-screen** — live Snowtrace/raw-ciphertext view side by side with the ticker. The closing demo line renders on this screen: *"The rate is public. The borrowing never was."*
 
-**D7 stretch (only if D1–D6 complete on schedule):** `avalanche-cli` local/testnet L1 with transaction allowlist wired to MemberRegistry membership; redeploy the full stack via the existing deploy scripts' second profile; demo shows both deployments. If behind schedule: L1 stays one slide in the deck. Do not let this endanger the Fuji build — bonus points never outrank a finished core.
+**D7 stretch (only if D1–D6 complete on schedule):** `avalanche-cli` local/testnet L1 with transaction allowlist wired to MemberRegistry membership; redeploy the full stack via the existing deploy scripts' second profile; demo shows both deployments. If behind schedule: L1 stays one slide in the deck. Do not let this endanger the Fuji build — bonus points never outrank a finished core. *(✅ SHIPPED post-core: local sovereign L1 `thewindowl1` (43117) with the TxAllowList precompile synced from MemberRegistry by `services/allowlist` — `demo/run_l1.sh`, `notes/09`.)*
 
 ---
 

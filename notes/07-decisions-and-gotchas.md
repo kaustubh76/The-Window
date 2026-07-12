@@ -332,6 +332,18 @@ ANY copy or docs, keep to this budget.
 **Where**: METHODOLOGY.md:32-49, dashboard/src/lib/honestClaims.ts,
 services/lib/adminops.mjs:1-2.
 
+## Subnet-EVM / permissioned-L1 gotchas
+
+See [09-permissioned-l1.md](09-permissioned-l1.md) for the full L1 story. The two that
+bite hardest, both fixed in `services/keeper/index.mjs`:
+
+1. **Demand-block chains freeze "latest block timestamp"** between txs — never use it
+   alone as "now" for scheduling; the keeper uses `max(chain time, wall clock)`.
+2. **Gas estimation simulates against the stale latest block**, so a time-gated call
+   (`closeEpoch`) can revert at ESTIMATION even though the actual tx's fresh block
+   would pass — the keeper sends time-gated calls with an explicit `gasLimit` to skip
+   estimation. State-gated calls are unaffected.
+
 ## Cloud hosting gotchas (Render / Docker / Vercel)
 
 Footguns hit while hosting the stack publicly (see [08-hosting-and-deployment.md](08-hosting-and-deployment.md)

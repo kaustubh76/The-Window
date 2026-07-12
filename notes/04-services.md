@@ -159,6 +159,7 @@ still returns the loan-id array (unchanged). The autonomous admin loop ignores t
 | agents | `services/agents/index.mjs` | — | Scripted simulated members: encrypted bids each Open epoch |
 | admin | `services/admin/index.mjs` | — | Autonomous auditor + loan-lifecycle orchestrator |
 | operator | `services/operator/index.mjs` | — | Vault-operator custody: confirms requested collateral locks |
+| allowlist | `services/allowlist/index.mjs` | — | **Permissioned-L1 only** (chain 43117): syncs the Subnet-EVM TxAllowList precompile from MemberRegistry membership — see [09-permissioned-l1](09-permissioned-l1.md). Idles harmlessly on chains without the precompile |
 
 ### indexer (:8787)
 
