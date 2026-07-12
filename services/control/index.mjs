@@ -49,8 +49,8 @@ app.get("/admin/decrypt/:epoch", async (q, r) => { try { const H = handles(ADMIN
 app.get("/admin/clearing/:epoch", async (q, r) => { try { const H = handles(ADMIN_PK); const { askSum, bidSum } = await admin.decryptDepth(H, Number(q.params.epoch)); const c = admin.computeClearing(askSum, bidSum); ok(r, { rStarBps: c.trade ? 100 + 25 * c.crossing : null, matched: c.matched.toString() }); } catch (e) { fail(r, e); } });
 
 // ---- keeper ops ----
-app.post("/keeper/open", async (_q, r) => { try { const tx = await handles(KEEPER_PK).auction.openEpoch(); await tx.wait(); ok(r, { txHash: tx.hash }); } catch (e) { fail(r, e); } });
-app.post("/keeper/close", async (_q, r) => { try { const tx = await handles(KEEPER_PK).auction.closeEpoch(); await tx.wait(); ok(r, { txHash: tx.hash }); } catch (e) { fail(r, e); } });
-app.post("/keeper/seize", async (q, r) => { try { const tx = await handles(KEEPER_PK).book.seize(q.body.loanId); await tx.wait(); ok(r, { seized: q.body.loanId, txHash: tx.hash }); } catch (e) { fail(r, e); } });
+app.post("/keeper/open", async (_q, r) => { try { const tx = await handles(KEEPER_PK).auction.openEpoch(); const rc = await tx.wait(); ok(r, { txHash: tx.hash, gasUsed: rc.gasUsed.toString() }); } catch (e) { fail(r, e); } });
+app.post("/keeper/close", async (_q, r) => { try { const tx = await handles(KEEPER_PK).auction.closeEpoch(); const rc = await tx.wait(); ok(r, { txHash: tx.hash, gasUsed: rc.gasUsed.toString() }); } catch (e) { fail(r, e); } });
+app.post("/keeper/seize", async (q, r) => { try { const tx = await handles(KEEPER_PK).book.seize(q.body.loanId); const rc = await tx.wait(); ok(r, { seized: q.body.loanId, txHash: tx.hash, gasUsed: rc.gasUsed.toString() }); } catch (e) { fail(r, e); } });
 
 app.listen(PORT, () => console.log(`[control] on :${PORT} (member/admin/keeper write API)`));

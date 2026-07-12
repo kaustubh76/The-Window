@@ -135,7 +135,7 @@ export class LiveAdapter implements WindowAdapter {
     try {
       const r = await run();
       onP?.({ phase: 'done', label: 'confirmed ✓', ms: r.proofMs });
-      return { ok: true, txHash: r.txHash, proofMs: r.proofMs, gasUsed: r.gasUsed };
+      return { ok: true, txHash: r.txHash, proofMs: r.proofMs, gasUsed: r.gasUsed != null ? Number(r.gasUsed) : undefined };
     } catch (e) {
       const error = e instanceof Error ? e.message : 'failed';
       onP?.({ phase: 'error', label: error });

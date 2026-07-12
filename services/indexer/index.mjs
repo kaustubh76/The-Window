@@ -29,12 +29,16 @@ const state = {
 
 const LOAN_STATUS = ["None", "Pending", "Active", "Repaid", "Defaulted"];
 
+// Rebuild is slower than its 3s cadence on real networks (paginated getLogs on a
+// public RPC), so: (a) rebuilds NEVER overlap — the next one is scheduled only after
+// the current one finishes; (b) everything is built into locals and published to
+// `state` in one synchronous block, so requests always see a complete snapshot.
 async function rebuild() {
   H = handles();
   const oracleI = H.oracle.interface;
   const epochLen = Number(await H.auction.epochLength());
   const tenorBlocks = Number(await H.book.tenorBlocks());
-  state.tenorMs = tenorBlocks * BLOCK_SEC * 1000;
+  const tenorMs = tenorBlocks * BLOCK_SEC * 1000;
   const blk = await provider.getBlock("latest");
   const nowTs = Number(blk.timestamp);
   const curBlock = blk.number;
@@ -42,11 +46,11 @@ async function rebuild() {
   const events = [];
 
   // epochs + clock
-  state.epochs.clear();
+  const epochs = new Map();
   for (let e = 1; e <= cur; e++) {
     const status = Number(await H.auction.epochStatus(e));
     const start = Number(await H.auction.epochStart(e));
-    state.epochs.set(e, {
+    epochs.set(e, {
       epoch: e,
       status: ["None", "Open", "Closed", "Printed"][status],
       openedAt: start * 1000,
@@ -56,7 +60,7 @@ async function rebuild() {
   }
 
   // prints (decode postPrint calldata for the depth curve — proven by the PoCD)
-  state.prints.clear();
+  const prints = new Map();
   const printed = await queryAll(H.oracle, H.oracle.filters.RatePrinted());
   for (const ev of printed) {
     const epoch = Number(ev.args.epoch);
@@ -83,14 +87,14 @@ async function rebuild() {
       printedAt: Number(pr.printedAt) * 1000,
       stale: false,
     };
-    state.prints.set(epoch, print);
+    prints.set(epoch, print);
     events.push({ type: "RatePrinted", block: ev.blockNumber, txHash: ev.transactionHash, print });
   }
   // no-trade epochs (curve didn't cross)
   for (const ev of await queryAll(H.oracle, H.oracle.filters.NoTrade())) {
     const epoch = Number(ev.args.epoch);
-    if (!state.prints.has(epoch)) {
-      state.prints.set(epoch, { epoch, rStarBps: null, aggVolume: "0", depth: [], pocd: { verified: true }, printedAt: 0, stale: true });
+    if (!prints.has(epoch)) {
+      prints.set(epoch, { epoch, rStarBps: null, aggVolume: "0", depth: [], pocd: { verified: true }, printedAt: 0, stale: true });
     }
     events.push({ type: "NoTrade", block: ev.blockNumber, txHash: ev.transactionHash, epoch });
   }
@@ -105,7 +109,7 @@ async function rebuild() {
   }
 
   // loans
-  state.loans = [];
+  const loans = [];
   // loanId -> creation tx hash, from LoanCreated logs (so the UI can link each loan on-chain)
   const loanTx = {};
   for (const e of await queryAll(H.book, H.book.filters.LoanCreated())) {
@@ -115,7 +119,7 @@ async function rebuild() {
   for (let id = 0; id < nextId; id++) {
     const L = await H.book.loans(id);
     const deadlineBlock = Number(L.deadlineBlock);
-    state.loans.push({
+    loans.push({
       id: String(id),
       epoch: Number(L.epoch),
       lender: L.lender.toLowerCase(),
@@ -128,13 +132,17 @@ async function rebuild() {
       createdTx: loanTx[String(id)] || null,
     });
   }
-  // loan-lifecycle + vault events for the firehose
+  // loan-lifecycle + vault events for the firehose (epoch joined from the loan record)
   for (const [name, ev] of [
     ["LoanCreated", H.book.filters.LoanCreated()], ["Funded", H.book.filters.Funded()],
     ["Repaid", H.book.filters.Repaid()], ["Seized", H.book.filters.Seized()],
   ]) {
     for (const e of await queryAll(H.book, ev)) {
-      events.push({ type: name, block: e.blockNumber, txHash: e.transactionHash, loanId: (e.args.loanId ?? 0n).toString() });
+      const loanId = (e.args.loanId ?? 0n).toString();
+      events.push({
+        type: name, block: e.blockNumber, txHash: e.transactionHash, loanId,
+        epoch: loans[Number(loanId)]?.epoch ?? 0,
+      });
     }
   }
   for (const [name, ev] of [
@@ -164,16 +172,13 @@ async function rebuild() {
       });
     }
   }
-  state.bids = bids;
-  state.events = events.sort((a, b) => a.block - b.block).slice(-200);
-
   // members (from MemberAdded events)
   const added = await queryAll(H.registry, H.registry.filters.MemberAdded());
-  state.members = [];
+  const members = [];
   for (const ev of added) {
     const who = ev.args.who.toLowerCase();
     const active = await H.registry.isMember(who);
-    state.members.push({
+    members.push({
       address: who,
       simulated: true, // all demo members are simulated
       active,
@@ -182,7 +187,17 @@ async function rebuild() {
     });
   }
 
-  state.lastBlock = await provider.getBlockNumber();
+  const lastBlock = await provider.getBlockNumber();
+
+  // atomic publish — no awaits between these assignments
+  state.epochs = epochs;
+  state.prints = prints;
+  state.loans = loans;
+  state.members = members;
+  state.bids = bids;
+  state.events = events.sort((a, b) => a.block - b.block).slice(-200);
+  state.tenorMs = tenorMs;
+  state.lastBlock = lastBlock;
 }
 
 const app = express();
@@ -247,7 +262,14 @@ app.get("/aggregates/:epoch", async (req, res) => {
 
 async function main() {
   await rebuild();
-  setInterval(() => rebuild().catch((e) => console.error("rebuild", e.message)), 3000);
+  // self-scheduling loop: the next rebuild starts 3s AFTER the previous one finishes
+  // (a fixed setInterval overlaps itself on real networks where a rebuild takes >3s,
+  // interleaving concurrent rebuilds into the served state).
+  const loop = () => setTimeout(async () => {
+    try { await rebuild(); } catch (e) { console.error("rebuild", e.message); }
+    loop();
+  }, 3000);
+  loop();
   app.listen(PORT, () => console.log(`indexer on :${PORT} (chain via ${provider._getConnection?.().url || "rpc"})`));
 }
 main().catch((e) => {

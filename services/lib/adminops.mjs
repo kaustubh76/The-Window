@@ -56,8 +56,8 @@ export async function printEpoch(adminPk, epoch) {
     depth.map((d) => ({ askSum: d.askSum, bidSum: d.bidSum })),
     proofs.map((p) => ({ a: p.a, b: p.b, c: p.c }))
   );
-  await tx.wait();
-  return { epoch, rStarTick: rStar, rStarBps: trade ? 100 + 25 * crossing : null, matched: matched.toString(), trade, txHash: tx.hash };
+  const rc = await tx.wait();
+  return { epoch, rStarTick: rStar, rStarBps: trade ? 100 + 25 * crossing : null, matched: matched.toString(), trade, txHash: tx.hash, gasUsed: rc.gasUsed.toString() };
 }
 
 // Pair lenders/borrowers at r* and postMatches. Returns created loan ids.
@@ -87,12 +87,12 @@ export async function matchEpoch(adminPk, epoch) {
 export async function confirmFunding(adminPk, loanId) {
   const H = handles(adminPk);
   const tx = await H.book.confirmFunding(loanId, "0x" + "00".repeat(32));
-  await tx.wait();
-  return { funded: String(loanId), txHash: tx.hash };
+  const rc = await tx.wait();
+  return { funded: String(loanId), txHash: tx.hash, gasUsed: rc.gasUsed.toString() };
 }
 export async function repay(adminPk, loanId) {
   const H = handles(adminPk);
   const tx = await H.book.repay(loanId, "0x" + "00".repeat(32));
-  await tx.wait();
-  return { repaid: String(loanId), txHash: tx.hash };
+  const rc = await tx.wait();
+  return { repaid: String(loanId), txHash: tx.hash, gasUsed: rc.gasUsed.toString() };
 }
