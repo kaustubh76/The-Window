@@ -22,9 +22,17 @@ contracts/broadcast/**/dry-run/
 circuits/build/
 *.ptau
 
-# foundry run artifacts (ephemeral, local)
-contracts/broadcast/
+# foundry run artifacts (ephemeral, local) — EXCEPT the live Fuji deployment:
+# the 43113 addresses + broadcast receipts are committed so a fresh clone gets
+# machine-readable addresses and on-chain provenance (public data only).
+contracts/broadcast/*
+!contracts/broadcast/DeployAll.s.sol/
+contracts/broadcast/DeployAll.s.sol/*
+!contracts/broadcast/DeployAll.s.sol/43113/
+contracts/broadcast/DeployAll.s.sol/43113/*
+!contracts/broadcast/DeployAll.s.sol/43113/run-latest.json
 contracts/deployments/*.json
+!contracts/deployments/43113.json
 
 # services / indexer data
 services/**/artifacts/
