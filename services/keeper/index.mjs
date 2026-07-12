@@ -17,7 +17,11 @@ async function tick() {
   const epochLen = Number(await H.auction.epochLength());
   const cur = Number(await H.auction.currentEpoch());
   const blk = await provider.getBlock("latest");
-  const now = Number(blk.timestamp);
+  // "now" = max(chain time, wall clock): on demand-block chains (Subnet-EVM L1) the
+  // latest block timestamp freezes between txs, while scripted Anvil demos push chain
+  // time AHEAD of wall clock (evm_increaseTime) — the max is right in both worlds,
+  // and matches what block.timestamp will be when our tx actually lands.
+  const now = Math.max(Number(blk.timestamp), Math.floor(Date.now() / 1000));
 
   const status = cur === 0 ? 0 : Number(await H.auction.epochStatus(cur));
 
@@ -30,7 +34,10 @@ async function tick() {
     const stalled = status === 2 && now - (closedAt[cur] || now) >= STALL_S;
     if (cur === 0 || status === 3 /*Printed*/ || stalled) {
       try {
-        const tx = await H.auction.openEpoch();
+        // explicit gasLimit: on demand-block chains (Subnet-EVM L1) estimation runs
+        // against the stale latest block and can revert even though OUR tx's fresh
+        // block would pass — skipping estimation breaks that deadlock.
+        const tx = await H.auction.openEpoch({ gasLimit: 300_000 });
         await tx.wait();
         console.log(`[keeper] opened epoch ${cur + 1}${stalled ? " (stall-guard: prev epoch never printed)" : ""}`);
       } catch (e) { /* someone else opened; ignore */ }
@@ -40,7 +47,9 @@ async function tick() {
     const start = Number(await H.auction.epochStart(cur));
     if (now >= start + epochLen) {
       try {
-        const tx = await H.auction.closeEpoch();
+        // explicit gasLimit — see openEpoch note (demand-block estimation deadlock:
+        // the wall-clock guard above already ensures the window truly elapsed)
+        const tx = await H.auction.closeEpoch({ gasLimit: 300_000 });
         await tx.wait();
         console.log(`[keeper] closed epoch ${cur} (admin will print)`);
       } catch (e) { /* not elapsed / already closed */ }

@@ -1,5 +1,5 @@
 # THE WINDOW — build / test / demo orchestration.
-.PHONY: help circuits circuits-array test test-contracts test-dash build deploy-local demo clean anvil
+.PHONY: help circuits circuits-array test test-contracts test-dash build deploy-local demo l1 clean anvil
 
 RPC_LOCAL := http://127.0.0.1:8545
 ANVIL_KEY0 := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
@@ -10,6 +10,7 @@ help:
 	@echo "make test            — forge tests (unit + invariants) + dashboard vitest"
 	@echo "make deploy-local    — deploy the full WINDOW stack to a running anvil"
 	@echo "make demo            — anvil + deploy + services + scripted full-epoch scenario"
+	@echo "make l1              — RPC_L1=<rpc> permissioned-L1 story (demo/run_l1.sh)"
 
 circuits:
 	bash circuits/build_pocd_gate.sh
@@ -39,6 +40,11 @@ deploy-local:
 
 demo:
 	bash demo/run_demo.sh
+
+# permissioned-L1 story (one-time L1 creation documented in demo/run_l1.sh header)
+l1:
+	@[ -n "$$RPC_L1" ] || { echo "RPC_L1 required — see: avalanche blockchain describe thewindowl1"; exit 1; }
+	bash demo/run_l1.sh
 
 clean:
 	cd contracts && forge clean
