@@ -33,16 +33,22 @@ Pages never know which adapter is behind it.
 - **`MockAdapter`** (`src/lib/adapter/mock/`) — the default. A seeded virtual-clock event timeline
   runs a full epoch loop: agents bid → epoch closes → M-ONIA prints with a PoCD → matches →
   loans cycle borrow → repay → release, with occasional defaults → seize. Ciphertexts are
-  **genuine ElGamal over BabyJubJub** (a browser port of `packages/eerc-node/elgamal.mjs`), so the
+  **genuine ElGamal over BabyJubJub** (a circomlibjs browser port of the ElGamal flows in
+  `packages/eerc-node/src/eerc.mjs`), so the
   Explorer shows real `c1/c2` on-chain-style data. Everything is a pure function of `(seed, scenario)`
   → deterministic replay, safe for a live pitch.
-- **`LiveAdapter`** (`src/lib/adapter/live/`) — the same interface against Avalanche Fuji. Wired today:
-  public TestUSDC balance + registration status (viem reads), and M-ONIA/depth/loans via the indexer
-  REST client. **Pending** (marked `EercNotReady`): the 5 money-market contract reads (add ABIs to
-  `contracts.ts` once deployed) and eERC proof-bearing writes / encrypted-balance decryption (attach
-  the bridge — see `hooks/useEercBridge.ts`). Nothing is fabricated.
+- **`LiveAdapter`** (`src/lib/adapter/live/`) — the same interface against the REAL deployed stack
+  (Avalanche Fuji). **Fully wired, reads AND writes**: reads come from the indexer REST API
+  (`VITE_INDEXER_URL`) and **every write goes through the Control API** (`VITE_CONTROL_URL`,
+  `services/control` :8899), where the server generates the real Groth16 proofs and signs with
+  server-side keys — the browser holds no keys and no circuit artifacts. Every write returns the
+  real Fuji `txHash` (surfaced as Snowtrace links) + receipt `gasUsed`. Nothing is fabricated, and
+  there is **no silent fallback to mock**: if the services are down, live mode shows a
+  "Connecting to services…" banner and empty state — never simulated data.
 
-Switch with `VITE_ADAPTER=mock|live` (see `.env.example`).
+Switch with `VITE_ADAPTER=mock|live` (see `.env.example`). The hosted app
+(https://the-window-five.vercel.app) is a prebuilt static bundle with `live` baked in,
+pointed at the Render-hosted indexer/control services.
 
 ## The demo
 
