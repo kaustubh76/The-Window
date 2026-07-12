@@ -34,11 +34,6 @@ export const ART = {
 
 export const BASE_POINT_ORDER = subOrder;
 
-// Array DepthCurve PoCD artifacts + proof generation (used by the admin service).
-export const ARRAY_ART = {
-  wasm: `${EERC_CIRCOM}/../depth_pocd_array_js/depth_pocd_array.wasm`, // resolved below
-};
-
 // Chunking parameters for the DepthCurve PoCD. The 37-tick curve is proven as
 // POCD_CHUNKS proofs of POCD_CHUNK_TICKS ticks each (circuit = DepthPoCDArray(10),
 // 102 public signals/chunk) so the generated verifier fits EIP-170 on real chains.

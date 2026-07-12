@@ -190,8 +190,7 @@ proofs/ciphertexts are accepted by the deployed contracts (`eerc.mjs:1-15`).
 |---|---|---|
 | `ART` | `eerc.mjs:20-33` | prebuilt eERC circuit artifacts in `contracts/lib/EncryptedERC/circom/build/`: `registration/{registration.wasm, circuit_final.zkey}`, `withdraw/{withdraw.wasm, circuit_final.zkey}`, `transfer/{transfer.wasm, transfer.zkey}` |
 | `BASE_POINT_ORDER` | `eerc.mjs:35` | re-export of BabyJubJub `subOrder` |
-| `ARRAY_ART` | `eerc.mjs:38-40` | nominal pointer for the array PoCD wasm; **stale/unused** — `genDepthArrayProof` takes an explicit `buildDir` instead (gotcha: the `${EERC_CIRCOM}/../depth_pocd_array_js/...` path does not resolve to `circuits/build/`) |
-| `POCD_CHUNK_TICKS = 10`, `POCD_CHUNKS = 4` | `eerc.mjs:46-47` | chunking parameters for the DepthCurve PoCD — **must match `MONIAOracle.CHUNK_TICKS`/`CHUNKS` and the circuit's N** (comment at `:42-45`) |
+| `POCD_CHUNK_TICKS = 10`, `POCD_CHUNKS = 4` | `eerc.mjs:41-42` | chunking parameters for the DepthCurve PoCD — **must match `MONIAOracle.CHUNK_TICKS`/`CHUNKS` and the circuit's N** (comment at `:37-40`). (The old stale `ARRAY_ART` export was deleted in the submission-hardening pass — `genDepthArrayProof` takes an explicit `buildDir`.) |
 
 **Key/user management**:
 

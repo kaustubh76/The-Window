@@ -23,7 +23,7 @@ contract DeployEERC is Script {
     function run() external {
         uint256 pk = vm.envOr("ADMIN_PK", uint256(0));
         if (pk == 0) {
-            // default anvil key #0
+            // throwaway local-only fallback (NOT a real key; set ADMIN_PK for any real run)
             pk = 0xac0976bf9e1bb63aa4d90da1f2c4dd5c9d8b9c8f8f0b7f3f9b0e9a3f7c1a2b3c;
         }
         vm.startBroadcast(pk);
