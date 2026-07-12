@@ -10,6 +10,7 @@ import { Countdown } from '../components/ui/Countdown';
 import { StatusPill } from '../components/ui/StatusPill';
 import { PoCDBadge } from '../components/ui/PoCDBadge';
 import { HonestClaimsCallout } from '../components/ui/HonestClaimsCallout';
+import { LiveTxFeed } from '../components/ui/LiveTxFeed';
 import { MarketHeroSkeleton } from '../components/ui/Skeleton';
 import { formatUsdcCompact } from '../lib/usdc';
 import { bpsToPctLabel } from '../lib/rates';
@@ -113,6 +114,9 @@ export default function MarketHome() {
           <HonestClaimsCallout compact />
         </div>
       </div>
+
+      {/* Live on-chain transaction feed — real Fuji txs with Snowtrace links */}
+      <LiveTxFeed />
 
       <div className="flex justify-center">
         <Link to="/methodology" className="text-sm text-gray-500 hover:text-benchmark-400 transition-colors inline-flex items-center gap-1.5">

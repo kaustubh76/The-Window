@@ -21,8 +21,9 @@ function egct(cipher) {
 export async function faucet(actorName, amount) {
   const a = ACTORS[actorName];
   const H = handles(a.pk);
-  await (await H.usdc.mint(a.address, BigInt(amount))).wait();
-  return { minted: amount.toString() };
+  const tx = await H.usdc.mint(a.address, BigInt(amount));
+  await tx.wait();
+  return { minted: amount.toString(), txHash: tx.hash };
 }
 
 // Resolve the borrower of a loan and lock its collateral.
@@ -40,8 +41,9 @@ export async function registerMember(actorName) {
   if (await H.registrar.isUserRegistered(a.address)) return { already: true };
   const user = userFromRaw(a.bjjRaw);
   const p = await genRegistrationProof(user, a.address, CHAIN_ID);
-  await (await H.registrar.register({ proofPoints: { a: p.a, b: p.b, c: p.c }, publicSignals: p.publicSignals })).wait();
-  return { registered: true };
+  const tx = await H.registrar.register({ proofPoints: { a: p.a, b: p.b, c: p.c }, publicSignals: p.publicSignals });
+  await tx.wait();
+  return { registered: true, txHash: tx.hash };
 }
 
 // Mint TestUSDC + approve + eERC deposit (converter wrap). Requires registered + auditor set.
@@ -54,8 +56,9 @@ export async function wrap(actorName, amount) {
   await (await H.usdc.approve(d.EERC_ADDR, amt)).wait();
   const user = userFromRaw(a.bjjRaw);
   const pct = processPoseidonEncryption([amt], user.publicKey);
-  await (await H.eerc["deposit(uint256,address,uint256[7])"](amt, d.TESTUSDC_ADDR, [...pct.ciphertext, ...pct.authKey, pct.nonce])).wait();
-  return { wrapped: amt.toString() };
+  const tx = await H.eerc["deposit(uint256,address,uint256[7])"](amt, d.TESTUSDC_ADDR, [...pct.ciphertext, ...pct.authKey, pct.nonce]);
+  await tx.wait();
+  return { wrapped: amt.toString(), txHash: tx.hash };
 }
 
 // eERC withdraw (unwrap): burn encrypted balance back to TestUSDC. Uses the eERC
@@ -69,8 +72,9 @@ export async function unwrap(actorName, amount) {
   const senderBalance = decryptEGCT(a.bjjRaw, { c1: { x: flat[0], y: flat[1] }, c2: { x: flat[2], y: flat[3] } }, 1 << 20);
   const eercAuditorPub = userFromRaw(ACTORS.admin.bjjRaw).publicKey; // eERC auditor = admin registered key
   const wp = await genWithdrawProof(user, BigInt(amount), senderBalance, flat, eercAuditorPub);
-  await (await H.eerc.withdraw(1n, { proofPoints: { a: wp.a, b: wp.b, c: wp.c }, publicSignals: wp.publicSignals }, wp.balancePCT)).wait();
-  return { unwrapped: BigInt(amount).toString() };
+  const tx = await H.eerc.withdraw(1n, { proofPoints: { a: wp.a, b: wp.b, c: wp.c }, publicSignals: wp.publicSignals }, wp.balancePCT);
+  await tx.wait();
+  return { unwrapped: BigInt(amount).toString(), txHash: tx.hash };
 }
 
 // Submit an encrypted bid (size hidden as an ElGamal EGCT to the auditor key).
@@ -81,7 +85,7 @@ export async function submitBid(actorName, side, tick, size) {
   const c = egct(cipher);
   const tx = side === 0 ? await H.auction.submitAsk(tick, c, "0x") : await H.auction.submitBid(tick, c);
   await tx.wait();
-  return { side, tick, submitted: true };
+  return { side, tick, submitted: true, txHash: tx.hash };
 }
 
 // Real ZK solvency proof (coll >= 1.2*loan) + vault.lockCollateral.
@@ -89,8 +93,9 @@ export async function lockCollateral(actorName, loanId, coll = 6000, loan = 5000
   const a = ACTORS[actorName];
   const H = handles(a.pk);
   const sp = await genSolvencyProof(BUILD, a.bjjRaw, coll, loan);
-  await (await H.vault.lockCollateral(loanId, sp.cColl, sp.cLoan, sp.ownerPub, sp.a, sp.b, sp.c)).wait();
-  return { loanId, locked: true };
+  const tx = await H.vault.lockCollateral(loanId, sp.cColl, sp.cLoan, sp.ownerPub, sp.a, sp.b, sp.c);
+  await tx.wait();
+  return { loanId, locked: true, txHash: tx.hash };
 }
 
 // Decrypt the member's own eERC balance (small demo amounts -> eGCT BSGS).

@@ -27,7 +27,7 @@ export function LoanCard({ loan, myAddress }: { loan: Loan; myAddress: Address }
       if (kind === 'fund') return adapter.fund(loan.id, onP);
       return adapter.repay(loan.id, onP);
     });
-    if (res.ok) toast.success(kind === 'coll' ? 'Collateral locked' : kind === 'fund' ? 'Loan funded' : 'Repaid — collateral released');
+    if (res.ok) toast.success(kind === 'coll' ? 'Collateral locked' : kind === 'fund' ? 'Loan funded' : 'Repaid — collateral released', res.txHash);
   };
 
   return (

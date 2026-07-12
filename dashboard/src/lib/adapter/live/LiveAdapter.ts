@@ -178,7 +178,7 @@ export class LiveAdapter implements WindowAdapter {
       printedAt: Date.now(),
       stale: r.trade === false,
     };
-    return { ok: true, proofMs: r.proofMs, print };
+    return { ok: true, proofMs: r.proofMs, txHash: r.txHash, print };
   }
   async adminPostMatches(e: EpochId): Promise<TxResult & { loans: Loan[] }> {
     await ctrl(`/admin/matches/${e}`, {});
@@ -187,13 +187,19 @@ export class LiveAdapter implements WindowAdapter {
 
   // ---- firehose (poll indexer /events, map to WindowEvents, buffer for the Explorer) ----
   private mapEvent(e: any): WindowEvent | null {
+    // every on-chain event carries the Fuji tx hash + block for Snowtrace linking
+    const meta = { txHash: e.txHash as (`0x${string}` | undefined), block: e.block as (number | undefined) };
     switch (e.type) {
-      case 'RatePrinted': { const p = mapPrint(e.print); return p ? { type: 'RatePrinted', print: p } : null; }
-      case 'LoanCreated': return { type: 'MatchesPosted', epoch: Number(e.epoch ?? 0), count: 1 };
-      case 'Funded': return { type: 'LoanFunded', loanId: String(e.loanId) };
-      case 'Repaid': return { type: 'LoanRepaid', loanId: String(e.loanId) };
+      case 'BidSubmitted':
+        return { type: 'BidSubmitted', side: (e.side === 'ask' ? 'ask' : 'bid') as Side, tick: Number(e.tick), by: e.who, simulated: true, cipher: LOCKED, ...meta };
+      case 'EpochOpened': return { type: 'EpochOpened', epoch: Number(e.epoch ?? 0), ...meta };
+      case 'EpochClosed': return { type: 'EpochClosed', epoch: Number(e.epoch ?? 0), ...meta };
+      case 'RatePrinted': { const p = mapPrint(e.print); return p ? { type: 'RatePrinted', print: p, ...meta } : null; }
+      case 'LoanCreated': return { type: 'MatchesPosted', epoch: Number(e.epoch ?? 0), count: 1, ...meta };
+      case 'Funded': return { type: 'LoanFunded', loanId: String(e.loanId), ...meta };
+      case 'Repaid': return { type: 'LoanRepaid', loanId: String(e.loanId), ...meta };
       case 'Seized':
-      case 'CollateralSeized': return { type: 'LoanSeized', loanId: String(e.loanId) };
+      case 'CollateralSeized': return { type: 'LoanSeized', loanId: String(e.loanId), ...meta };
       default: return null; // NoTrade / CollateralLocked / Released — reflected via reads
     }
   }

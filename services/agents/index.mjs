@@ -1,7 +1,7 @@
 // Agents — scripted SIMULATED members that submit encrypted bids each epoch.
 // Disclosed everywhere as simulations of member behaviour, not organic discovery.
 import { handles } from "../lib/chain.mjs";
-import { ACTORS, AGENTS, AUDITOR } from "../lib/actors.mjs";
+import { ACTORS, AGENTS, agentBids, AUDITOR } from "../lib/actors.mjs";
 import { encryptMessage } from "../../packages/eerc-node/src/eerc.mjs";
 import "dotenv/config";
 
@@ -15,7 +15,7 @@ async function tick() {
     if (epoch === 0) return;
     if (Number(await anyH.auction.epochStatus(epoch)) !== 1 /*Open*/ || epoch === lastBidEpoch) return;
 
-    for (const a of AGENTS) {
+    for (const a of agentBids(epoch)) {
       const H = handles(ACTORS[a.actor].pk);
       try {
         const { cipher } = encryptMessage(AUDITOR.pub, a.size);

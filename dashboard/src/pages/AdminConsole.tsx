@@ -44,7 +44,7 @@ export default function AdminConsole() {
     const res = await printTx.run((onP) => adapter.adminPostPrint(target, onP));
     if (res.ok) {
       setPrint(res.print);
-      toast.success(`M-ONIA printed: ${res.print.rStarBps != null ? bpsToPctLabel(res.print.rStarBps) : 'no-trade'}`);
+      toast.success(`M-ONIA printed: ${res.print.rStarBps != null ? bpsToPctLabel(res.print.rStarBps) : 'no-trade'}`, res.txHash);
     }
   };
   const step4 = async () => {

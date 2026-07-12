@@ -33,13 +33,13 @@ export default function WalletPage() {
     const res = await regTx.run((onP) => adapter.register(address, onP));
     if (res.ok) {
       setRegistered(true);
-      toast.success('Registered — your encryption key is ready');
+      toast.success('Registered — your encryption key is ready', res.txHash);
     }
   };
   const doFaucet = async () => {
     if (!adapter) return;
-    await adapter.faucet(address, 1000_000000n);
-    toast.success('+1,000 TestUSDC');
+    const res = await adapter.faucet(address, 1000_000000n);
+    toast.success('+1,000 TestUSDC', res.txHash);
   };
   const doWrap = async () => {
     if (!adapter) return;
@@ -52,7 +52,7 @@ export default function WalletPage() {
     }
     const res = await wrapTx.run((onP) => adapter.wrap(address, micro, onP));
     if (res.ok) {
-      toast.success(`Wrapped ${wrapAmt} USDC → encrypted`);
+      toast.success(`Wrapped ${wrapAmt} USDC → encrypted`, res.txHash);
       setWrapAmt('');
     } else toast.error(res.error ?? 'Wrap failed');
   };
@@ -67,7 +67,7 @@ export default function WalletPage() {
     }
     const res = await unwrapTx.run((onP) => adapter.unwrap(address, micro, onP));
     if (res.ok) {
-      toast.success(`Unwrapped ${unwrapAmt} USDC`);
+      toast.success(`Unwrapped ${unwrapAmt} USDC`, res.txHash);
       setUnwrapAmt('');
     } else toast.error(res.error ?? 'Unwrap failed');
   };

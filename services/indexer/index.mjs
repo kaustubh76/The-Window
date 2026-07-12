@@ -84,7 +84,7 @@ async function rebuild() {
       stale: false,
     };
     state.prints.set(epoch, print);
-    events.push({ type: "RatePrinted", block: ev.blockNumber, print });
+    events.push({ type: "RatePrinted", block: ev.blockNumber, txHash: ev.transactionHash, print });
   }
   // no-trade epochs (curve didn't cross)
   for (const ev of await queryAll(H.oracle, H.oracle.filters.NoTrade())) {
@@ -92,11 +92,25 @@ async function rebuild() {
     if (!state.prints.has(epoch)) {
       state.prints.set(epoch, { epoch, rStarBps: null, aggVolume: "0", depth: [], pocd: { verified: true }, printedAt: 0, stale: true });
     }
-    events.push({ type: "NoTrade", block: ev.blockNumber, epoch });
+    events.push({ type: "NoTrade", block: ev.blockNumber, txHash: ev.transactionHash, epoch });
+  }
+
+  // epoch-boundary events (open/close) — more visible on-chain activity in the feed
+  for (const [name, ev] of [
+    ["EpochOpened", H.auction.filters.EpochOpened()], ["EpochClosed", H.auction.filters.EpochClosed()],
+  ]) {
+    for (const e of await queryAll(H.auction, ev)) {
+      events.push({ type: name, block: e.blockNumber, txHash: e.transactionHash, epoch: Number(e.args.epoch ?? 0n) });
+    }
   }
 
   // loans
   state.loans = [];
+  // loanId -> creation tx hash, from LoanCreated logs (so the UI can link each loan on-chain)
+  const loanTx = {};
+  for (const e of await queryAll(H.book, H.book.filters.LoanCreated())) {
+    loanTx[(e.args.loanId ?? 0n).toString()] = e.transactionHash;
+  }
   const nextId = Number(await H.book.nextLoanId());
   for (let id = 0; id < nextId; id++) {
     const L = await H.book.loans(id);
@@ -111,6 +125,7 @@ async function rebuild() {
       deadlineBlock,
       deadlineAt: (nowTs + Math.max(0, deadlineBlock - curBlock) * BLOCK_SEC) * 1000,
       status: LOAN_STATUS[Number(L.state)],
+      createdTx: loanTx[String(id)] || null,
     });
   }
   // loan-lifecycle + vault events for the firehose
@@ -119,7 +134,7 @@ async function rebuild() {
     ["Repaid", H.book.filters.Repaid()], ["Seized", H.book.filters.Seized()],
   ]) {
     for (const e of await queryAll(H.book, ev)) {
-      events.push({ type: name, block: e.blockNumber, loanId: (e.args.loanId ?? 0n).toString() });
+      events.push({ type: name, block: e.blockNumber, txHash: e.transactionHash, loanId: (e.args.loanId ?? 0n).toString() });
     }
   }
   for (const [name, ev] of [
@@ -127,10 +142,9 @@ async function rebuild() {
     ["CollateralSeized", H.vault.filters.Seized()],
   ]) {
     for (const e of await queryAll(H.vault, ev)) {
-      events.push({ type: name, block: e.blockNumber, loanId: (e.args.loanId ?? 0n).toString() });
+      events.push({ type: name, block: e.blockNumber, txHash: e.transactionHash, loanId: (e.args.loanId ?? 0n).toString() });
     }
   }
-  state.events = events.sort((a, b) => a.block - b.block).slice(-200);
 
   // per-member bids (who + tick only; size stays ciphertext)
   const bids = {};
@@ -141,11 +155,17 @@ async function rebuild() {
       (bids[who] ||= []).push({
         id: `${e.args.epoch}-${side}-${e.args.tick}-${e.blockNumber}`,
         epoch: Number(e.args.epoch), side, tick: Number(e.args.tick), bps: bps(e.args.tick),
-        size: LOCKED, status: "submitted",
+        size: LOCKED, status: "submitted", txHash: e.transactionHash,
+      });
+      // also surface each bid in the global firehose (encrypted amount stays hidden)
+      events.push({
+        type: "BidSubmitted", block: e.blockNumber, txHash: e.transactionHash,
+        epoch: Number(e.args.epoch), side, tick: Number(e.args.tick), who,
       });
     }
   }
   state.bids = bids;
+  state.events = events.sort((a, b) => a.block - b.block).slice(-200);
 
   // members (from MemberAdded events)
   const added = await queryAll(H.registry, H.registry.filters.MemberAdded());

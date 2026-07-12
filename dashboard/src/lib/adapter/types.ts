@@ -81,6 +81,7 @@ export interface Loan {
   collateral?: Ciphertext;
   deadlineAt: number; // virtual ms
   deadlineBlock?: number;
+  createdTx?: Hex | null; // LoanCreated tx hash (Snowtrace link)
   status: LoanStatus;
   healthPct?: number; // collateral vs 120% haircut, only when viewer entitled
   fundedAt?: number;
@@ -128,16 +129,19 @@ export interface TxResult {
 export type OnProof = (p: ProofProgress) => void;
 
 // ---- event firehose (drives live UI + demo) ----
+// On-chain events carry the Fuji tx hash + block so the UI can link to Snowtrace.
+export interface TxMeta { txHash?: Hex; block?: number }
 export type WindowEvent =
   | { type: 'clock'; clock: EpochClock }
-  | { type: 'BidSubmitted'; side: Side; tick: TickIndex; by: Address; simulated: boolean; cipher: Ciphertext }
-  | { type: 'EpochClosed'; epoch: EpochId }
-  | { type: 'RatePrinted'; print: MoniaPrint }
-  | { type: 'MatchesPosted'; epoch: EpochId; count: number }
-  | { type: 'LoanFunded'; loanId: LoanId }
-  | { type: 'LoanRepaid'; loanId: LoanId }
-  | { type: 'LoanSeized'; loanId: LoanId }
-  | { type: 'PrivateTransfer'; from: Address; to: Address; auditorPCT: string[] } // no amount — honest
+  | ({ type: 'BidSubmitted'; side: Side; tick: TickIndex; by: Address; simulated: boolean; cipher: Ciphertext } & TxMeta)
+  | ({ type: 'EpochOpened'; epoch: EpochId } & TxMeta)
+  | ({ type: 'EpochClosed'; epoch: EpochId } & TxMeta)
+  | ({ type: 'RatePrinted'; print: MoniaPrint } & TxMeta)
+  | ({ type: 'MatchesPosted'; epoch: EpochId; count: number } & TxMeta)
+  | ({ type: 'LoanFunded'; loanId: LoanId } & TxMeta)
+  | ({ type: 'LoanRepaid'; loanId: LoanId } & TxMeta)
+  | ({ type: 'LoanSeized'; loanId: LoanId } & TxMeta)
+  | ({ type: 'PrivateTransfer'; from: Address; to: Address; auditorPCT: string[] } & TxMeta) // no amount — honest
   | { type: 'ProofProgress'; scope: string; progress: ProofProgress };
 
 export type Unsubscribe = () => void;

@@ -52,7 +52,7 @@ export default function AuctionPage() {
     if (belowMinBid(micro, PROFILE)) return toast.error(`Below minimum bid (${PROFILE === 'DEMO' ? '1' : '10'} USDC)`);
     const res = await run((onP) => (side === 'ask' ? adapter.submitAsk(address, tick, micro, onP) : adapter.submitBid(address, tick, micro, onP)));
     if (res.ok) {
-      toast.success(`Encrypted ${side === 'ask' ? 'ask' : 'bid'} submitted at ${bpsToPctLabel(tickToBps(tick))}`);
+      toast.success(`Encrypted ${side === 'ask' ? 'ask' : 'bid'} submitted at ${bpsToPctLabel(tickToBps(tick))}`, res.txHash);
       setSize('');
     } else toast.error(res.error ?? 'Submit failed');
   };

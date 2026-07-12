@@ -1,0 +1,5 @@
+# The Dockerfile uses selective COPY, so only node_modules needs stripping from the
+# copied source trees (they're reinstalled for linux via `npm ci` inside the image).
+**/node_modules
+.git
+.gitignore

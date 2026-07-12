@@ -21,13 +21,13 @@ export default function KeeperConsole() {
 
   const closeEpoch = async () => {
     if (!adapter || !clock) return;
-    await adapter.closeEpoch(clock.epoch);
-    toast.success(`Closed epoch ${clock.epoch}`);
+    const res = await adapter.closeEpoch(clock.epoch);
+    toast.success(`Closed epoch ${clock.epoch}`, res.txHash);
   };
   const seize = async (id: string) => {
     if (!adapter) return;
-    await adapter.seize(id);
-    toast.success(`Seized collateral for ${id}`);
+    const res = await adapter.seize(id);
+    toast.success(`Seized collateral for ${id}`, res.txHash);
   };
 
   return (

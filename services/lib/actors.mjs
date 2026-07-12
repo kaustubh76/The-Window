@@ -45,7 +45,8 @@ export function actorByAddress(addr) {
   return BY_ADDRESS[String(addr).toLowerCase()] || null;
 }
 
-// The bidding agents (all registered members).
+// The bidding agents (all registered members). tick/size are BASE values; the live
+// stack jitters them per epoch via agentBids() so r*, matched volume, and defaults vary.
 export const AGENTS = [
   { actor: "lender1", label: "yield-target lender A", side: 0, tick: 6, size: 400n },
   { actor: "lender2", label: "yield-target lender B", side: 0, tick: 8, size: 500n },
@@ -53,6 +54,26 @@ export const AGENTS = [
   { actor: "agent4", label: "opportunistic borrower", side: 1, tick: 12, size: 300n },
   { actor: "agent5", label: "noise trader", side: 1, tick: 16, size: 120n },
 ];
+
+// Deterministic hash -> [0,1) seeded by (epoch, salt): reproducible per run, but each
+// epoch looks different. Uses keccak so it's stable and needs no RNG state.
+function seeded(epoch, salt) {
+  return Number(BigInt(ethers.keccak256(ethers.toUtf8Bytes(`window:bid:${epoch}:${salt}`))) % 1_000_000n) / 1_000_000;
+}
+// jitter a base value by ±spread (rounded, clamped to >= min)
+function jitter(epoch, salt, base, spread, min) {
+  return Math.max(min, Math.round(base + (seeded(epoch, salt) * 2 - 1) * spread));
+}
+
+// Per-epoch bid params: lenders keep low ask ticks, borrowers higher bid ticks (so the
+// book still crosses most epochs), but ticks (±3 asks / ±5 bids) and sizes (±150) vary.
+export function agentBids(epoch) {
+  return AGENTS.map((a) => ({
+    ...a,
+    tick: Math.min(36, jitter(epoch, `${a.actor}:tick`, a.tick, a.side === 0 ? 3 : 5, 0)),
+    size: BigInt(jitter(epoch, `${a.actor}:size`, Number(a.size), 150, 60)),
+  }));
+}
 
 // Members registered on-chain (need MemberRegistry membership to bid / lock).
 export const MEMBER_NAMES = ["lender1", "lender2", "borrower", "agent4", "agent5"];

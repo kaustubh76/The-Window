@@ -51,12 +51,13 @@ export async function printEpoch(adminPk, epoch) {
 
   const { proofs } = await genDepthArrayProof(BUILD, AUDITOR.priv, AUDITOR.pub, askAgg, bidAgg, askSum, bidSum);
   const rStar = trade ? crossing : NO_TRADE;
-  await (await H.oracle.postPrint(
+  const tx = await H.oracle.postPrint(
     epoch, rStar,
     depth.map((d) => ({ askSum: d.askSum, bidSum: d.bidSum })),
     proofs.map((p) => ({ a: p.a, b: p.b, c: p.c }))
-  )).wait();
-  return { epoch, rStarTick: rStar, rStarBps: trade ? 100 + 25 * crossing : null, matched: matched.toString(), trade };
+  );
+  await tx.wait();
+  return { epoch, rStarTick: rStar, rStarBps: trade ? 100 + 25 * crossing : null, matched: matched.toString(), trade, txHash: tx.hash };
 }
 
 // Pair lenders/borrowers at r* and postMatches. Returns created loan ids.
@@ -85,9 +86,13 @@ export async function matchEpoch(adminPk, epoch) {
 // Auditor-attested confirm/repay (LoanBook onlyAdmin).
 export async function confirmFunding(adminPk, loanId) {
   const H = handles(adminPk);
-  await (await H.book.confirmFunding(loanId, "0x" + "00".repeat(32))).wait();
+  const tx = await H.book.confirmFunding(loanId, "0x" + "00".repeat(32));
+  await tx.wait();
+  return { funded: String(loanId), txHash: tx.hash };
 }
 export async function repay(adminPk, loanId) {
   const H = handles(adminPk);
-  await (await H.book.repay(loanId, "0x" + "00".repeat(32))).wait();
+  const tx = await H.book.repay(loanId, "0x" + "00".repeat(32));
+  await tx.wait();
+  return { repaid: String(loanId), txHash: tx.hash };
 }

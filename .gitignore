@@ -34,6 +34,8 @@ services/**/artifacts/
 # dashboard
 dashboard/dist/
 dashboard/.vite/
+dashboard/.vercel_static/
+dashboard/.vercel/
 
 # os
 .DS_Store
