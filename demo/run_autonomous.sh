@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Unattended story: start the full service stack (keeper + agents + admin + operator
-# + operator + indexer + control) with NO scenario script. The services autonomously
+# Unattended story: start the full service stack (indexer + control + keeper +
+# agents + operator + admin) with NO scenario script. The services autonomously
 # open/close epochs, bid, print M-ONIA (real PoCD), and cycle loans (repay + default->seize).
 set -euo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"

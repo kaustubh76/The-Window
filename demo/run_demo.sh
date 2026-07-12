@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command local demo: fresh Anvil (raised code limit) -> deploy+wire full stack
+# One-command local demo: fresh vanilla Anvil -> deploy+wire full stack
 # with the REAL 37-tick verifier -> register members -> run the scripted full-epoch
 # scenario (real proofs) -> start the indexer + live dashboard.
 set -euo pipefail
