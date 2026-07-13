@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import path from 'path';
@@ -8,7 +8,21 @@ import path from 'path';
 // need top-level await and must not be pre-bundled. See spike/NOTES.md Q7.
 // nodePolyfills provides Buffer/process/util/assert globals that circomlibjs (blake-hash,
 // ffjavascript) require at module-eval time in the browser.
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // Production builds must SAY which adapter they ship: ADAPTER_MODE defaults to
+  // 'mock' (src/config.ts), so building without the gitignored .env.production
+  // (fresh clone, Vercel source-build) would silently ship the in-browser
+  // simulation instead of the live Fuji app. Fail the build instead.
+  if (mode === 'production' && !loadEnv(mode, __dirname, 'VITE_').VITE_ADAPTER) {
+    throw new Error(
+      'VITE_ADAPTER is unset for a production build — set it in dashboard/.env.production ' +
+      "('live' for the hosted app, 'mock' only for an intentional demo build). See notes/08.",
+    );
+  }
+  return config;
+});
+
+const config = defineConfig({
   plugins: [
     nodePolyfills({ globals: { Buffer: true, global: true, process: true } }),
     react(),

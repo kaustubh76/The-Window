@@ -26,9 +26,20 @@ function bjjRaw(name) {
   return BigInt(ethers.keccak256(ethers.toUtf8Bytes("the-window:bjj:" + name)));
 }
 
+// Fallback keys (Anvil PKs above, demo auditor below) are for local chains ONLY:
+// Anvil 31337 and the local permissioned L1 43117 (run_l1.sh's zero-secret posture
+// relies on the demo auditor default). On any real network a missing env var must
+// fail loudly, not silently sign with a publicly-known key.
+const CHAIN_ID = Number(process.env.CHAIN_ID || 31337);
+const LOCAL_CHAIN = [31337, 43117].includes(CHAIN_ID);
+function localOnly(value, what) {
+  if (!LOCAL_CHAIN) throw new Error(`[actors] FATAL: ${what} required on chain ${CHAIN_ID} — built-in fallbacks are local-only`);
+  return value;
+}
+
 export const ACTORS = {};
 for (const [name, dflt] of Object.entries(ANVIL)) {
-  const pk = process.env[ENV_KEY[name]] || dflt;
+  const pk = process.env[ENV_KEY[name]] || localOnly(dflt, ENV_KEY[name]);
   ACTORS[name] = {
     name,
     pk,
@@ -79,9 +90,9 @@ export function agentBids(epoch) {
 export const MEMBER_NAMES = ["lender1", "lender2", "borrower", "agent4", "agent5"];
 
 export const AUDITOR = {
-  priv: BigInt(process.env.AUDITOR_BJJ_PRIV || "2748579834902348905823409582340958234"),
+  priv: BigInt(process.env.AUDITOR_BJJ_PRIV || localOnly("2748579834902348905823409582340958234", "AUDITOR_BJJ_PRIV")),
   pub: [
-    BigInt(process.env.AUDITOR_BJJ_PUB_X || "15126131017275559229883198140197230023892265818363501039953620538039205717764"),
-    BigInt(process.env.AUDITOR_BJJ_PUB_Y || "7504911034826791718448377250227968384413910115391011404817860837847273794444"),
+    BigInt(process.env.AUDITOR_BJJ_PUB_X || localOnly("15126131017275559229883198140197230023892265818363501039953620538039205717764", "AUDITOR_BJJ_PUB_X")),
+    BigInt(process.env.AUDITOR_BJJ_PUB_Y || localOnly("7504911034826791718448377250227968384413910115391011404817860837847273794444", "AUDITOR_BJJ_PUB_Y")),
   ],
 };

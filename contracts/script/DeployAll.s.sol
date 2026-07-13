@@ -40,6 +40,9 @@ contract DeployAll is Script {
         uint256 auditorPubX = vm.envOr("AUDITOR_PUB_X", uint256(0));
         uint256 auditorPubY = vm.envOr("AUDITOR_PUB_Y", uint256(0));
         bool real = vm.envOr("USE_REAL_VERIFIERS", uint256(0)) == 1;
+        // The always-true MockVerifier must never reach a shared network: the mock
+        // default exists only so bare local Anvil runs skip proving.
+        require(real || block.chainid == 31337, "MockVerifier is local-Anvil-only; set USE_REAL_VERIFIERS=1");
 
         vm.startBroadcast(pk);
 
