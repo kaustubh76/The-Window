@@ -32,5 +32,6 @@ async function tick() {
 }
 
 console.log("[operator] vault-operator custody service running; poll", POLL_MS, "ms");
-setInterval(tick, POLL_MS);
-tick();
+// self-scheduling (no overlap) — see services/allowlist/index.mjs for the reasoning
+const loop = () => setTimeout(async () => { await tick(); loop(); }, POLL_MS);
+tick().then(loop);

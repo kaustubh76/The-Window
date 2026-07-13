@@ -72,5 +72,7 @@ async function tick() {
 }
 
 console.log("[admin] autonomous orchestrator running (plaintext stays here); poll", POLL_MS, "ms");
-setInterval(tick, POLL_MS);
-tick();
+// self-scheduling (no overlap): processEpoch runs for minutes (proving + waits); the
+// `handled` set already guards re-entry, but overlapped ticks still stack RPC reads.
+const loop = () => setTimeout(async () => { await tick(); loop(); }, POLL_MS);
+tick().then(loop);

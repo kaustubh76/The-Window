@@ -72,5 +72,8 @@ async function tick() {
 }
 
 console.log("[keeper] running; poll", POLL_MS, "ms");
-setInterval(() => tick().catch((e) => console.error("[keeper]", e.message)), POLL_MS);
-tick().catch((e) => console.error("[keeper]", e.message));
+// self-scheduling (no overlap): a tick's send+confirm can outlast POLL_MS on a real
+// chain; overlapped ticks double-send open/close — see services/allowlist/index.mjs.
+const run = () => tick().catch((e) => console.error("[keeper]", e.message));
+const loop = () => setTimeout(async () => { await run(); loop(); }, POLL_MS);
+run().then(loop);
