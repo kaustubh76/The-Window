@@ -30,19 +30,23 @@ Deadline: **July 19, 2026, 03:29 IST** · Portal: Avalanche Builder Hub (the eve
 - **Technologies**: BOTH tracks — eERC (converter mode, deep integration, own circuits)
   AND a permissioned Avalanche L1 (`thewindowl1`, TxAllowList synced from
   MemberRegistry — `demo/run_l1.sh`, `notes/09`).
-- **Fuji demo**: live + autonomous (epochs advance while `demo/run_fuji.sh` drivers run
-  on the operator machine; the hosted site always serves live Fuji state).
+- **Fuji demo**: live + autonomous 24/7 — the drivers run in the cloud (chained GitHub
+  Actions jobs, `.github/workflows/fuji-drivers.yml`; `notes/08`), so epochs advance with
+  no machine of ours running; the hosted site always serves live Fuji state.
 - **Confidential value moving on-chain, live**: encrypted bids accumulate
   homomorphically on-chain every epoch; per-print 4×Groth16 PoCD verified on-chain
   (~4.4M gas); loans cycle borrow → repay / default → seize with encrypted amounts.
 
 ## Before the judging session (day-of runbook)
 
-1. Start the drivers: `bash demo/run_fuji.sh` (auction advances every 120 s).
+1. Drivers are already running in the cloud (`gh run list --workflow fuji-drivers` shows
+   an active run; auction advances every ~120 s). Manual kick if ever needed:
+   `gh workflow run fuji-drivers`.
 2. Sanity: `curl https://window-indexer.onrender.com/health` — `lastBlock` near Fuji head;
    open the live app, check the "Live on-chain activity" feed shows fresh Snowtrace txs.
-3. If the public Fuji RPC rate-limits the drivers (500s in `/tmp/window_fuji_*.log`),
-   restart `run_fuji.sh` — or set a dedicated RPC in `RPC_LOCAL`.
+3. If the public Fuji RPC rate-limits the drivers (500s in the GH run log), re-dispatch
+   the workflow — or fall back to local `bash demo/run_fuji.sh` (disable the workflow
+   first: two drivers sharing keys race nonces).
 4. Optional encore: the permissioned L1 — `avalanche blockchain deploy thewindowl1 --local`
    then `RPC_L1=<rpc> make l1` (proof script prints PASS lines: non-member chain-blocked,
    member transacts, auction alive).

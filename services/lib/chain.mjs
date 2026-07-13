@@ -22,17 +22,30 @@ export const RPC = process.env.RPC_LOCAL || "http://127.0.0.1:8545";
 export const CHAIN_ID = Number(process.env.CHAIN_ID || 31337);
 export const provider = new ethers.JsonRpcProvider(RPC);
 
+// CHAIN_ID selects deployments/<id>.json — with a mismatched RPC a service would
+// silently send txs to another network's addresses. Fail fast on the first
+// answer instead (an unreachable RPC is fine: every service loop retries).
+provider.getNetwork().then((n) => {
+  if (Number(n.chainId) !== CHAIN_ID) {
+    console.error(`[chain] FATAL: RPC ${RPC} reports chain ${n.chainId}, expected CHAIN_ID=${CHAIN_ID} (deployments/${CHAIN_ID}.json)`);
+    process.exit(1);
+  }
+}).catch(() => {});
+
 // Earliest block worth scanning for events (set to the deployment block on real
 // networks — public RPCs cap eth_getLogs ranges, e.g. Fuji at 2048 blocks).
 export const START_BLOCK = Number(process.env.START_BLOCK || 0);
 const LOG_WINDOW = Number(process.env.LOG_WINDOW || 2000);
 
 // queryFilter that respects public-RPC getLogs range caps: paginates in
-// LOG_WINDOW-block windows from START_BLOCK (or `from`) to latest. On local
-// chains (window >= chain height) this collapses to a single call.
-export async function queryAll(contract, filter, from = START_BLOCK) {
-  const latest = await provider.getBlockNumber();
-  if (latest - from <= LOG_WINDOW) return contract.queryFilter(filter, from, "latest");
+// LOG_WINDOW-block windows from START_BLOCK (or `from`) to `to` (default:
+// latest). On local chains (window >= chain height) this collapses to a
+// single call. `to` lets callers pin one head for many filters (and advance
+// an incremental cursor consistently).
+export async function queryAll(contract, filter, from = START_BLOCK, to) {
+  const latest = to ?? await provider.getBlockNumber();
+  if (from > latest) return [];
+  if (latest - from <= LOG_WINDOW) return contract.queryFilter(filter, from, latest);
   const out = [];
   for (let lo = from; lo <= latest; lo += LOG_WINDOW + 1) {
     const hi = Math.min(lo + LOG_WINDOW, latest);

@@ -1,0 +1,44 @@
+# Drives THE WINDOW's Fuji (43113) market 24/7 from GitHub-hosted runners.
+# Chained ~5h50m jobs: the hourly schedule + concurrency group mean at most one
+# run is active and the next queued run takes over within minutes of the previous
+# one ending (KEEPER_STALL_S bridges the seam on-chain). No checkout: the public
+# Docker image bakes the gitignored runtime artifacts (contracts/out ABIs,
+# deployments/43113.json, circuit zkeys) that a fresh clone would lack.
+name: fuji-drivers
+on:
+  schedule:
+    - cron: "17 * * * *" # hourly, off the :00 rush (GH delays/drops on-the-hour crons)
+  workflow_dispatch: {}
+
+concurrency:
+  group: fuji-drivers
+  cancel-in-progress: false # overlapping runs would race nonces on the shared actor keys
+
+jobs:
+  drive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: run drivers (keeper + agents + operator + admin)
+        run: |
+          docker run --rm \
+            -e RPC_LOCAL="https://api.avax-test.network/ext/bc/C/rpc" \
+            -e CHAIN_ID=43113 \
+            -e START_BLOCK=56937681 \
+            -e PROFILE=DEMO \
+            -e EPOCH_LEN=120 -e TENOR_BLOCKS=60 -e KEEPER_STALL_S=300 \
+            -e KEEPER_POLL_MS=5000 -e AGENTS_POLL_MS=5000 -e ADMIN_POLL_MS=5000 -e OPERATOR_POLL_MS=5000 \
+            -e ADMIN_PK="${{ secrets.ADMIN_PK }}" \
+            -e KEEPER_PK="${{ secrets.KEEPER_PK }}" \
+            -e VAULT_OPERATOR_PK="${{ secrets.VAULT_OPERATOR_PK }}" \
+            -e LENDER1_PK="${{ secrets.LENDER1_PK }}" \
+            -e LENDER2_PK="${{ secrets.LENDER2_PK }}" \
+            -e BORROWER_PK="${{ secrets.BORROWER_PK }}" \
+            -e AGENT4_PK="${{ secrets.AGENT4_PK }}" \
+            -e AGENT5_PK="${{ secrets.AGENT5_PK }}" \
+            -e AUDITOR_BJJ_PRIV="${{ secrets.AUDITOR_BJJ_PRIV }}" \
+            -e AUDITOR_BJJ_PUB_X="${{ secrets.AUDITOR_BJJ_PUB_X }}" \
+            -e AUDITOR_BJJ_PUB_Y="${{ secrets.AUDITOR_BJJ_PUB_Y }}" \
+            -e KEEPALIVE_URLS="https://window-indexer.onrender.com/health,https://window-control.onrender.com/health" \
+            docker.io/kaushtubh02/thewindow-backend:latest \
+            node services/drivers/index.mjs
