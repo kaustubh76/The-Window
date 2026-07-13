@@ -1,13 +1,15 @@
 // Indexer — read-only. Rebuilds WINDOW state from chain events and serves a REST
 // API shaped to the dashboard's frozen adapter types (dashboard/src/lib/adapter/types.ts).
 // Crash-safe: no persistence, re-derives everything from chain on boot + poll.
+// Logs are fetched INCREMENTALLY (append-only cursor): public RPCs cap getLogs
+// ranges, and rescanning deploy->head every tick grows without bound on Fuji.
 import express from "express";
 import cors from "cors";
-import { ethers } from "ethers";
-import { provider, handles, queryAll } from "../lib/chain.mjs";
+import { provider, handles, queryAll, START_BLOCK } from "../lib/chain.mjs";
 
 const PORT = Number(process.env.INDEXER_PORT || 8787);
 const NO_TRADE = 65535;
+const ASK = 0, BID = 1; // AuctionHouse.sol constants — not worth an RPC read
 const bps = (tick) => 100 + 25 * Number(tick);
 const cipher = (egct) => ({
   c1: [egct.c1.x.toString(), egct.c1.y.toString()],
@@ -15,7 +17,7 @@ const cipher = (egct) => ({
 });
 
 const BLOCK_SEC = Number(process.env.BLOCK_SEC || 2); // display estimate for deadlines
-let H;
+const H = handles(); // no RPC — deployments JSON + ABIs from disk
 const state = {
   epochs: new Map(), // epoch -> {status, openedAt, closesAt}
   prints: new Map(), // epoch -> MoniaPrint
@@ -25,73 +27,127 @@ const state = {
   bids: {}, // address -> MyBid[]
   tenorMs: 0,
   lastBlock: 0,
+  clock: null, // rebuild-time snapshot; serves /epoch/clock without live RPC
 };
 
-const LOAN_STATUS = ["None", "Pending", "Active", "Repaid", "Defaulted"];
+// ---- incremental log store ---------------------------------------------------
+// Events are append-only on every chain we run (Fuji/L1 finalize instantly; local
+// chains are only ever reset together with this process), so each rebuild fetches
+// just (cursor+1 .. head] per filter and appends. All filters commit together —
+// a failed round is discarded whole, so `logs` never holds a mixed-height view.
+const FILTERS = {
+  epochOpened: [H.auction, H.auction.filters.EpochOpened()],
+  epochClosed: [H.auction, H.auction.filters.EpochClosed()],
+  epochPrinted: [H.auction, H.auction.filters.EpochPrinted()],
+  askSubmitted: [H.auction, H.auction.filters.AskSubmitted()],
+  bidSubmitted: [H.auction, H.auction.filters.BidSubmitted()],
+  ratePrinted: [H.oracle, H.oracle.filters.RatePrinted()],
+  noTrade: [H.oracle, H.oracle.filters.NoTrade()],
+  loanCreated: [H.book, H.book.filters.LoanCreated()],
+  funded: [H.book, H.book.filters.Funded()],
+  repaid: [H.book, H.book.filters.Repaid()],
+  bookSeized: [H.book, H.book.filters.Seized()],
+  vaultLocked: [H.vault, H.vault.filters.Locked()],
+  vaultReleased: [H.vault, H.vault.filters.Released()],
+  vaultSeized: [H.vault, H.vault.filters.Seized()],
+  memberAdded: [H.registry, H.registry.filters.MemberAdded()],
+  memberRemoved: [H.registry, H.registry.filters.MemberRemoved()],
+};
+const logs = Object.fromEntries(Object.keys(FILTERS).map((k) => [k, []]));
+let cursor = START_BLOCK - 1;
 
-// Rebuild is slower than its 3s cadence on real networks (paginated getLogs on a
-// public RPC), so: (a) rebuilds NEVER overlap — the next one is scheduled only after
-// the current one finishes; (b) everything is built into locals and published to
-// `state` in one synchronous block, so requests always see a complete snapshot.
+async function syncLogs(head) {
+  if (head <= cursor) return;
+  const keys = Object.keys(FILTERS);
+  const fresh = {};
+  for (let i = 0; i < keys.length; i += 4) { // bounded fan-out (public-RPC friendly)
+    await Promise.all(keys.slice(i, i + 4).map(async (k) => {
+      const [c, f] = FILTERS[k];
+      fresh[k] = await queryAll(c, f, cursor + 1, head);
+    }));
+  }
+  for (const k of keys) logs[k].push(...fresh[k]); // all-or-nothing commit
+  cursor = head;
+}
+
+// one-time-per-record caches (each record is immutable once written on-chain)
+const printCache = new Map(); // epoch -> MoniaPrint (cached only once fully decoded)
+const sizeCache = new Map(); // loanId -> cipher(cSize)
+const aggCache = new Map(); // epoch -> /aggregates response (frozen once Printed)
+let epochLen, tenorBlocks; // constructor immutables — read once
+
+// Everything is built into locals and published to `state` in one synchronous
+// block, so requests always see a complete snapshot (rebuilds never overlap:
+// the loop only schedules the next one after the current one finishes).
 async function rebuild() {
-  H = handles();
   const oracleI = H.oracle.interface;
-  const epochLen = Number(await H.auction.epochLength());
-  const tenorBlocks = Number(await H.book.tenorBlocks());
+  epochLen ??= Number(await H.auction.epochLength());
+  tenorBlocks ??= Number(await H.book.tenorBlocks());
   const tenorMs = tenorBlocks * BLOCK_SEC * 1000;
   const blk = await provider.getBlock("latest");
   const nowTs = Number(blk.timestamp);
   const curBlock = blk.number;
-  const cur = Number(await H.auction.currentEpoch());
+  await syncLogs(curBlock);
   const events = [];
 
-  // epochs + clock
+  // epochs + clock — derived from Opened/Closed/Printed events (no per-epoch reads;
+  // EpochPrinted covers no-trade prints too, via markPrinted)
+  const closedSet = new Set(logs.epochClosed.map((e) => Number(e.args.epoch)));
+  const printedSet = new Set(logs.epochPrinted.map((e) => Number(e.args.epoch)));
   const epochs = new Map();
-  for (let e = 1; e <= cur; e++) {
-    const status = Number(await H.auction.epochStatus(e));
-    const start = Number(await H.auction.epochStart(e));
+  let cur = 0;
+  for (const ev of logs.epochOpened) {
+    const e = Number(ev.args.epoch);
+    const start = Number(ev.args.startTs);
+    cur = Math.max(cur, e);
     epochs.set(e, {
       epoch: e,
-      status: ["None", "Open", "Closed", "Printed"][status],
+      status: printedSet.has(e) ? "Printed" : closedSet.has(e) ? "Closed" : "Open",
       openedAt: start * 1000,
       closesAt: (start + epochLen) * 1000,
       epochLenMs: epochLen * 1000,
     });
   }
 
-  // prints (decode postPrint calldata for the depth curve — proven by the PoCD)
+  // prints (decode postPrint calldata for the depth curve — proven by the PoCD).
+  // getTransaction + prints() run ONCE per epoch ever (immutable after the
+  // AlreadyPrinted guard); a print whose tx the RPC hasn't indexed yet is left
+  // uncached and decoded again next rebuild.
   const prints = new Map();
-  const printed = await queryAll(H.oracle, H.oracle.filters.RatePrinted());
-  for (const ev of printed) {
+  for (const ev of logs.ratePrinted) {
     const epoch = Number(ev.args.epoch);
-    const rTick = Number(ev.args.rStarTick);
-    const tx = await provider.getTransaction(ev.transactionHash);
-    let depth = [];
-    try {
-      const parsed = oracleI.parseTransaction({ data: tx.data });
-      const d = parsed.args.depth; // (askSum,bidSum)[]
-      depth = d.map((p, tick) => ({
-        tick,
-        bps: bps(tick),
-        supply: p.askSum.toString(),
-        demand: p.bidSum.toString(),
-      }));
-    } catch { /* attested / non-decodable */ }
-    const pr = await H.oracle.prints(epoch);
-    const print = {
-      epoch,
-      rStarBps: rTick === NO_TRADE ? null : bps(rTick),
-      aggVolume: pr.aggVolume.toString(),
-      depth,
-      pocd: { verified: true, txHash: ev.transactionHash },
-      printedAt: Number(pr.printedAt) * 1000,
-      stale: false,
-    };
+    let print = printCache.get(epoch);
+    if (!print) {
+      const rTick = Number(ev.args.rStarTick);
+      const tx = await provider.getTransaction(ev.transactionHash);
+      let depth = [];
+      try {
+        const parsed = oracleI.parseTransaction({ data: tx.data });
+        const d = parsed.args.depth; // (askSum,bidSum)[]
+        depth = d.map((p, tick) => ({
+          tick,
+          bps: bps(tick),
+          supply: p.askSum.toString(),
+          demand: p.bidSum.toString(),
+        }));
+      } catch { /* attested / non-decodable */ }
+      const pr = await H.oracle.prints(epoch);
+      print = {
+        epoch,
+        rStarBps: rTick === NO_TRADE ? null : bps(rTick),
+        aggVolume: pr.aggVolume.toString(),
+        depth,
+        pocd: { verified: true, txHash: ev.transactionHash },
+        printedAt: Number(pr.printedAt) * 1000,
+        stale: false,
+      };
+      if (tx) printCache.set(epoch, print);
+    }
     prints.set(epoch, print);
     events.push({ type: "RatePrinted", block: ev.blockNumber, txHash: ev.transactionHash, print });
   }
   // no-trade epochs (curve didn't cross)
-  for (const ev of await queryAll(H.oracle, H.oracle.filters.NoTrade())) {
+  for (const ev of logs.noTrade) {
     const epoch = Number(ev.args.epoch);
     if (!prints.has(epoch)) {
       prints.set(epoch, { epoch, rStarBps: null, aggVolume: "0", depth: [], pocd: { verified: true }, printedAt: 0, stale: true });
@@ -100,44 +156,43 @@ async function rebuild() {
   }
 
   // epoch-boundary events (open/close) — more visible on-chain activity in the feed
-  for (const [name, ev] of [
-    ["EpochOpened", H.auction.filters.EpochOpened()], ["EpochClosed", H.auction.filters.EpochClosed()],
-  ]) {
-    for (const e of await queryAll(H.auction, ev)) {
+  for (const [name, arr] of [["EpochOpened", logs.epochOpened], ["EpochClosed", logs.epochClosed]]) {
+    for (const e of arr) {
       events.push({ type: name, block: e.blockNumber, txHash: e.transactionHash, epoch: Number(e.args.epoch ?? 0n) });
     }
   }
 
-  // loans
+  // loans — every static field rides on LoanCreated; only the cSize ciphertext
+  // needs a (memoized, once-per-loan) contract read. Status is derived from the
+  // Funded/Repaid/Seized event sets. LoanCreated order == loanId order (ids are
+  // assigned sequentially in postMatches), so loans[i].id === String(i).
+  const fundedSet = new Set(logs.funded.map((e) => (e.args.loanId ?? 0n).toString()));
+  const repaidSet = new Set(logs.repaid.map((e) => (e.args.loanId ?? 0n).toString()));
+  const seizedSet = new Set(logs.bookSeized.map((e) => (e.args.loanId ?? 0n).toString()));
   const loans = [];
-  // loanId -> creation tx hash, from LoanCreated logs (so the UI can link each loan on-chain)
-  const loanTx = {};
-  for (const e of await queryAll(H.book, H.book.filters.LoanCreated())) {
-    loanTx[(e.args.loanId ?? 0n).toString()] = e.transactionHash;
-  }
-  const nextId = Number(await H.book.nextLoanId());
-  for (let id = 0; id < nextId; id++) {
-    const L = await H.book.loans(id);
-    const deadlineBlock = Number(L.deadlineBlock);
+  for (const e of logs.loanCreated) {
+    const id = (e.args.loanId ?? 0n).toString();
+    if (!sizeCache.has(id)) sizeCache.set(id, cipher((await H.book.loans(e.args.loanId)).cSize));
+    const deadlineBlock = Number(e.args.deadlineBlock);
     loans.push({
-      id: String(id),
-      epoch: Number(L.epoch),
-      lender: L.lender.toLowerCase(),
-      borrower: L.borrower.toLowerCase(),
-      rateBps: bps(L.rateTick),
-      size: cipher(L.cSize),
+      id,
+      epoch: Number(e.args.epoch),
+      lender: e.args.lender.toLowerCase(),
+      borrower: e.args.borrower.toLowerCase(),
+      rateBps: bps(e.args.rateTick),
+      size: sizeCache.get(id),
       deadlineBlock,
       deadlineAt: (nowTs + Math.max(0, deadlineBlock - curBlock) * BLOCK_SEC) * 1000,
-      status: LOAN_STATUS[Number(L.state)],
-      createdTx: loanTx[String(id)] || null,
+      status: seizedSet.has(id) ? "Defaulted" : repaidSet.has(id) ? "Repaid" : fundedSet.has(id) ? "Active" : "Pending",
+      createdTx: e.transactionHash,
     });
   }
   // loan-lifecycle + vault events for the firehose (epoch joined from the loan record)
-  for (const [name, ev] of [
-    ["LoanCreated", H.book.filters.LoanCreated()], ["Funded", H.book.filters.Funded()],
-    ["Repaid", H.book.filters.Repaid()], ["Seized", H.book.filters.Seized()],
+  for (const [name, arr] of [
+    ["LoanCreated", logs.loanCreated], ["Funded", logs.funded],
+    ["Repaid", logs.repaid], ["Seized", logs.bookSeized],
   ]) {
-    for (const e of await queryAll(H.book, ev)) {
+    for (const e of arr) {
       const loanId = (e.args.loanId ?? 0n).toString();
       events.push({
         type: name, block: e.blockNumber, txHash: e.transactionHash, loanId,
@@ -145,11 +200,11 @@ async function rebuild() {
       });
     }
   }
-  for (const [name, ev] of [
-    ["CollateralLocked", H.vault.filters.Locked()], ["CollateralReleased", H.vault.filters.Released()],
-    ["CollateralSeized", H.vault.filters.Seized()],
+  for (const [name, arr] of [
+    ["CollateralLocked", logs.vaultLocked], ["CollateralReleased", logs.vaultReleased],
+    ["CollateralSeized", logs.vaultSeized],
   ]) {
-    for (const e of await queryAll(H.vault, ev)) {
+    for (const e of arr) {
       events.push({ type: name, block: e.blockNumber, txHash: e.transactionHash, loanId: (e.args.loanId ?? 0n).toString() });
     }
   }
@@ -157,8 +212,8 @@ async function rebuild() {
   // per-member bids (who + tick only; size stays ciphertext)
   const bids = {};
   const LOCKED = { c1: ["0", "1"], c2: ["0", "1"] };
-  for (const [side, ev] of [["ask", H.auction.filters.AskSubmitted()], ["bid", H.auction.filters.BidSubmitted()]]) {
-    for (const e of await queryAll(H.auction, ev)) {
+  for (const [side, arr] of [["ask", logs.askSubmitted], ["bid", logs.bidSubmitted]]) {
+    for (const e of arr) {
       const who = e.args.who.toLowerCase();
       (bids[who] ||= []).push({
         id: `${e.args.epoch}-${side}-${e.args.tick}-${e.blockNumber}`,
@@ -172,22 +227,21 @@ async function rebuild() {
       });
     }
   }
-  // members (from MemberAdded events)
-  const added = await queryAll(H.registry, H.registry.filters.MemberAdded());
-  const members = [];
-  for (const ev of added) {
+  // members — the active flag replays Added/Removed in chain order (no isMember reads)
+  const activeSet = new Set();
+  for (const ev of [...logs.memberAdded, ...logs.memberRemoved]
+    .sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index)) {
     const who = ev.args.who.toLowerCase();
-    const active = await H.registry.isMember(who);
-    members.push({
-      address: who,
-      simulated: true, // all demo members are simulated
-      active,
-      joinedEpoch: Number(ev.args.joinedEpoch),
-      roles: ["public"],
-    });
+    if (ev.fragment.name === "MemberAdded") activeSet.add(who);
+    else activeSet.delete(who);
   }
-
-  const lastBlock = await provider.getBlockNumber();
+  const members = logs.memberAdded.map((ev) => ({
+    address: ev.args.who.toLowerCase(),
+    simulated: true, // all demo members are simulated
+    active: activeSet.has(ev.args.who.toLowerCase()),
+    joinedEpoch: Number(ev.args.joinedEpoch),
+    roles: ["public"],
+  }));
 
   // atomic publish — no awaits between these assignments
   state.epochs = epochs;
@@ -197,7 +251,8 @@ async function rebuild() {
   state.bids = bids;
   state.events = events.sort((a, b) => a.block - b.block).slice(-200);
   state.tenorMs = tenorMs;
-  state.lastBlock = lastBlock;
+  state.lastBlock = curBlock;
+  state.clock = { epoch: cur, chainNowMs: nowTs * 1000, wallMs: Date.now() };
 }
 
 const app = express();
@@ -205,11 +260,15 @@ app.use(cors());
 
 app.get("/health", (_req, res) => res.json({ ok: true, lastBlock: state.lastBlock }));
 
-app.get("/epoch/clock", async (_req, res) => {
-  const cur = Number(await H.auction.currentEpoch());
-  const e = state.epochs.get(cur) || { epoch: cur, status: "None", openedAt: 0, closesAt: 0, epochLenMs: 0 };
-  const blk = await provider.getBlock("latest");
-  res.json({ ...e, profile: process.env.PROFILE || "DEMO", tenorMs: state.tenorMs, now: Number(blk.timestamp) * 1000 });
+// Served from the rebuild snapshot (chain time extrapolated by wall clock since
+// capture) — this endpoint is polled at 1s per browser and must not fan out to
+// the RPC, nor hang when the RPC flakes.
+app.get("/epoch/clock", (_req, res) => {
+  const c = state.clock;
+  const profile = process.env.PROFILE || "DEMO";
+  if (!c) return res.json({ epoch: 0, status: "None", openedAt: 0, closesAt: 0, epochLenMs: 0, profile, tenorMs: 0, now: Date.now() });
+  const e = state.epochs.get(c.epoch) || { epoch: c.epoch, status: "None", openedAt: 0, closesAt: 0, epochLenMs: 0 };
+  res.json({ ...e, profile, tenorMs: state.tenorMs, now: c.chainNowMs + (Date.now() - c.wallMs) });
 });
 
 app.get("/events", (req, res) => {
@@ -248,29 +307,50 @@ app.get("/members", (_req, res) => res.json(state.members));
 // raw aggregate ciphertexts per side/tick for the explorer split-screen (no plaintext)
 app.get("/aggregates/:epoch", async (req, res) => {
   const epoch = Number(req.params.epoch);
-  const out = [];
-  const ASK = Number(await H.auction.ASK());
-  const BID = Number(await H.auction.BID());
-  for (let t = 0; t < 37; t++) {
-    const a = await H.auction.getAggregate(epoch, ASK, t);
-    const b = await H.auction.getAggregate(epoch, BID, t);
-    out.push({ side: "ask", tick: t, agg: cipher(a.egct) });
-    out.push({ side: "bid", tick: t, agg: cipher(b.egct) });
+  try {
+    if (aggCache.has(epoch)) return res.json(aggCache.get(epoch));
+    const out = [];
+    for (let lo = 0; lo < 37; lo += 8) { // bounded fan-out — 74 serial reads takes seconds on a public RPC
+      const chunk = await Promise.all(
+        Array.from({ length: Math.min(8, 37 - lo) }, (_, i) => lo + i).map(async (t) => {
+          const [a, b] = await Promise.all([
+            H.auction.getAggregate(epoch, ASK, t),
+            H.auction.getAggregate(epoch, BID, t),
+          ]);
+          return [{ side: "ask", tick: t, agg: cipher(a.egct) }, { side: "bid", tick: t, agg: cipher(b.egct) }];
+        }),
+      );
+      out.push(...chunk.flat());
+    }
+    if (state.epochs.get(epoch)?.status === "Printed") aggCache.set(epoch, out); // frozen after close
+    res.json(out);
+  } catch (e) {
+    res.status(502).json({ error: e?.shortMessage || e?.message || String(e) });
   }
-  res.json(out);
 });
 
 async function main() {
-  await rebuild();
-  // self-scheduling loop: the next rebuild starts 3s AFTER the previous one finishes
-  // (a fixed setInterval overlaps itself on real networks where a rebuild takes >3s,
-  // interleaving concurrent rebuilds into the served state).
-  const loop = () => setTimeout(async () => {
-    try { await rebuild(); } catch (e) { console.error("rebuild", e.message); }
-    loop();
-  }, 3000);
-  loop();
+  // Listen FIRST: the port (and /health) stay up while the initial backfill runs —
+  // on Fuji the first sync spans the whole deploy->head range, and boot must not
+  // die on a transient RPC 500 either (handlers serve empty state until the first
+  // rebuild publishes; the loop retries forever).
   app.listen(PORT, () => console.log(`indexer on :${PORT} (chain via ${provider._getConnection?.().url || "rpc"})`));
+  let backfilled = false;
+  const tick = async () => {
+    const t0 = Date.now();
+    try {
+      await rebuild();
+      const ms = Date.now() - t0;
+      if (!backfilled) { console.log(`[indexer] backfill to block ${state.lastBlock} in ${ms}ms`); backfilled = true; }
+      else if (ms > 3000) console.log(`[indexer] slow rebuild: ${ms}ms`); // slower than the cadence = worth a line
+    } catch (e) {
+      console.error("rebuild", e?.shortMessage || e?.message || e);
+    }
+    // self-scheduling: the next rebuild starts 3s AFTER the previous one finishes
+    // (a fixed setInterval overlaps itself when a rebuild takes >3s)
+    setTimeout(tick, 3000);
+  };
+  tick();
 }
 main().catch((e) => {
   console.error(e);

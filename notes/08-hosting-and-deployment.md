@@ -29,12 +29,14 @@ frontend + read/write APIs so anyone can use the dashboard from a browser.
    └──HTTPS──► Fuji C-Chain RPC (viem/wagmi, direct, no backend)
 
  Render window-indexer / window-control  ──► Fuji RPC (read chain / send txs)
- Local Mac: keeper + agents + operator + admin  (demo/run_fuji.sh)  ──► Fuji RPC  (drive the auction)
+ GitHub Actions (fuji-drivers workflow): keeper + agents + operator + admin ──► Fuji RPC (drive the auction)
 ```
 
-Only `indexer` and `control` are hosted (the two HTTP services the frontend talks to). The four
-autonomous **drivers run on the local Mac** — see "Free-tier reality" below. Everyone reads the same
-Fuji state, so it doesn't matter where the drivers run.
+Only `indexer` and `control` are hosted on Render (the two HTTP services the frontend talks to).
+The four autonomous **drivers run in the cloud on GitHub Actions** — see "Drivers in the cloud"
+below. Everyone reads the same Fuji state, so it doesn't matter where the drivers run;
+`demo/run_fuji.sh` remains the local-dev way to drive the market (disable the workflow first —
+two drivers sharing keys race nonces).
 
 CORS: both services already `app.use(cors())` (wildcard) — no change was needed for cross-origin
 fetches from the Vercel origin.
@@ -124,17 +126,34 @@ baked backend URLs deterministic (see [07](07-decisions-and-gotchas.md)).
    rm -rf .vercel_static && mkdir .vercel_static && cp -R dist/* .vercel_static/ && <write vercel.json>
    cd .vercel_static && npx vercel deploy --prod --yes --name the-window
    ```
-3. **Drivers** (any `services/{keeper,agents,operator,admin}` or `services/lib` change): restart
-   `bash demo/run_fuji.sh` on the Mac so the new code loads.
+3. **Drivers** (any `services/{keeper,agents,operator,admin,drivers}` or `services/lib` change):
+   push the image (step 1) — the drivers pick it up on their **next chained GH run** (≤ ~6 h). To
+   force it now: `gh run cancel` the active `fuji-drivers` run, then `gh workflow run fuji-drivers`.
 
-## Free-tier reality (important)
+## Drivers in the cloud (GitHub Actions)
 
-- Render free tier has **no always-on background workers** — that's why the 4 drivers run on the Mac.
-  The hosted **site is always up** (serves whatever Fuji state exists to any visitor), but the auction
-  only **advances** while `demo/run_fuji.sh` is running locally. Fully hands-off 24/7 needs a paid
-  Render worker.
-- Free web services **cold-start** (~30–60 s) after ~15 min idle and share a 750 instance-hours/month
-  cap. First hit after idle shows a brief loading state.
+The 4 autonomous drivers run 24/7 from `.github/workflows/fuji-drivers.yml` (repo must stay
+**public** — free unlimited Actions minutes, 4-vCPU runners so chunked-PoCD proving matches laptop
+speed; Render free instances at 0.1 CPU would take minutes per proof):
+
+- **Chained runs**: hourly `cron: 17 * * * *` + `concurrency: fuji-drivers` (no cancel) → at most
+  one active run of `timeout-minutes: 350`; the queued next run takes over within minutes of the
+  previous one ending. Worst-case seam (GH cron jitter / dropped schedule) ≈ 1 h; `KEEPER_STALL_S=300`
+  re-opens cleanly after any gap. Note GH auto-disables schedules after 60 days without repo activity.
+- **No checkout**: the job just `docker run`s the public backend image — it already bakes the
+  gitignored ABIs, `deployments/43113.json`, and zkeys that a fresh clone lacks.
+- **Supervisor**: `services/drivers/index.mjs` spawns keeper/agents/operator/admin in one container
+  and restarts any child that dies (drivers are stateless; chain state is the source of truth).
+- **Keep-alive**: while driving, the supervisor pings the two Render `/health` URLs every 4 min
+  (`KEEPALIVE_URLS`) so free-tier spin-down (15 min idle) never cold-starts a judge's first paint.
+- **Secrets**: the 8 actor PKs + `AUDITOR_BJJ_*` live in GH Actions secrets (same throwaway,
+  testnet-only trust class as the Render env vars).
+
+## Free-tier reality (still important)
+
+- Free web services **cold-start** (~30–60 s) after ~15 min idle and share a **750 instance-hours/
+  month cap across the whole Render workspace** (other projects included). The driver keep-alive
+  keeps indexer+control warm ~24/7 while the workflow runs — watch workspace usage after judging.
 - `control` is open-CORS + unauthenticated by design and holds throwaway Fuji actor keys as Render env
   secrets — acceptable for a testnet demo, **never** for real value.
 

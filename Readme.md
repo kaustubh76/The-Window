@@ -13,7 +13,7 @@ This README is the original build spec (written up-front, executed by an AI codi
 
 The full stack is deployed and running autonomously on the real Fuji testnet — real chunked Groth16 PoCD verified on-chain on every M-ONIA print (~4.4M gas), complete loan lifecycles including default → seize, no mocks anywhere in the live path.
 
-**Hosted app:** https://the-window-five.vercel.app (frontend, Vercel) → `window-indexer` / `window-control` .onrender.com (backend, Render) → Fuji. Note: on the Render free tier the four autonomous drivers run separately (`demo/run_fuji.sh`), so the auction *advances* while those run; the site itself always serves live Fuji state (services cold-start ~30–60 s after idle).
+**Hosted app:** https://the-window-five.vercel.app (frontend, Vercel) → `window-indexer` / `window-control` .onrender.com (backend, Render) → Fuji. The four autonomous drivers run 24/7 in the cloud (chained GitHub Actions jobs — `.github/workflows/fuji-drivers.yml`, `notes/08`), so the auction advances with no local machine involved; `demo/run_fuji.sh` remains the local-dev driver path.
 
 | Contract | Fuji address |
 |---|---|
