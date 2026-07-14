@@ -62,8 +62,21 @@ export function abi(name, sol = name) {
   return JSON.parse(readFileSync(`${CROOT}/out/${sol}.sol/${name}.json`, "utf8")).abi;
 }
 
+// Every service awaits tx.wait() after each send (no pipelining), so NonceManager's
+// cached delta buys nothing — but it DOES desync whenever anything else moves the
+// account's nonce: another process sharing the key (agents vs admin vs control all
+// sign for the same actors), or a send that failed after the counter bumped. That
+// stranded the market twice (silent NoTrade streak; admin stuck NONCE_EXPIRED on one
+// epoch for hours). Re-sync from the chain's pending count before every send.
+class FreshNonceManager extends ethers.NonceManager {
+  async sendTransaction(tx) {
+    this.reset();
+    return super.sendTransaction(tx);
+  }
+}
+
 export function wallet(pk) {
-  return new ethers.NonceManager(new ethers.Wallet(pk, provider));
+  return new FreshNonceManager(new ethers.Wallet(pk, provider));
 }
 
 export function contract(addr, name, signerOrPk) {

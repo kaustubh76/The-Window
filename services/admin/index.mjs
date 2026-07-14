@@ -59,11 +59,17 @@ async function tick() {
   try {
     const H = handles(ADMIN_PK);
     const cur = Number(await H.auction.currentEpoch());
-    for (let e = 1; e <= cur; e++) {
+    // NEWEST first, ONE epoch per tick: the headline M-ONIA print stays fresh while
+    // any backlog backfills behind it, and one failing epoch can never starve the
+    // head (ascending processing once wedged the admin on a single epoch for hours).
+    for (let e = cur; e >= 1; e--) {
       if (handled.has(e)) continue;
-      if (Number(await H.auction.epochStatus(e)) === 2 /*Closed*/) {
+      const status = Number(await H.auction.epochStatus(e));
+      if (status === 3 /*Printed*/) { handled.add(e); continue; } // don't re-read forever
+      if (status === 2 /*Closed*/) {
         handled.add(e);
         await processEpoch(e).catch((err) => { handled.delete(e); throw err; });
+        break;
       }
     }
   } catch (e) {
