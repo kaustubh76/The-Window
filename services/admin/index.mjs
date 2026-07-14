@@ -12,6 +12,11 @@ import { ethers } from "ethers";
 import "dotenv/config";
 
 const POLL_MS = Number(process.env.ADMIN_POLL_MS || 4000);
+// How far behind the head to backfill missed prints. Each backlog epoch costs a
+// full print (~4.4M gas + ~90s proving) — after a long driver outage an unbounded
+// backfill would grind for days and drain the admin's gas on history nobody reads
+// (the dashboard shows the recent window; older gaps read as stale epochs).
+const BACKFILL = Number(process.env.ADMIN_BACKFILL_EPOCHS || 25);
 const handled = new Set();
 
 async function processEpoch(epoch) {
@@ -64,6 +69,7 @@ async function tick() {
     // head (ascending processing once wedged the admin on a single epoch for hours).
     for (let e = cur; e >= 1; e--) {
       if (handled.has(e)) continue;
+      if (e < cur - BACKFILL) { handled.add(e); continue; } // beyond the backfill window — leave unprinted
       const status = Number(await H.auction.epochStatus(e));
       if (status === 3 /*Printed*/) { handled.add(e); continue; } // don't re-read forever
       if (status === 2 /*Closed*/) {
