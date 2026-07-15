@@ -6,6 +6,32 @@ Subnet-EVM **TxAllowList precompile** is kept in sync with the on-chain member s
 a dedicated keeper, so a non-member cannot send ANY transaction on the chain. The
 market's own governance gates the network itself.
 
+## Why this is composition, not a mirror (two leaks, two primitives)
+
+The L1 is not "the Fuji stack deployed twice." eERC and the permissioned L1 close
+**different halves** of the same leak, and only together are they sufficient for the
+stigma thesis:
+
+- **eERC hides the _amount_.** But the leak budget (Readme §4) is explicit that member
+  addresses, bid participation, and timing stay **public** on Fuji. For a product whose
+  whole premise is stigma ("observable borrowing kills lending markets"), *participation
+  itself is the signal* — seeing "agent X is at the window this epoch" leaks the stigma
+  even with the size encrypted. So amount-privacy is **necessary but not sufficient**.
+- **The permissioned L1 hides _participation_ and gates _access_.** Non-members can
+  neither transact (TxAllowList write-gate) nor observe (the READ_GATE read-gate, below).
+
+One contract, `MemberRegistry`, is the single source of truth for **four** layers at
+once — market (`onlyMember`), eERC enrollment (no chain tx ⇒ no register), network
+(TxAllowList), and observation (READ_GATE). One `removeMember` revokes all four
+atomically (`demo/verify_l1_revoke.mjs`) — a *complete* eviction that is impossible on
+shared public Fuji, where you can only block a bad actor's `onlyMember` calls, never
+evict them from the settlement layer or the network.
+
+The honest framing: public Fuji is the **amount-private hard-mode** deployment (required
+by the brief, most impressive cryptographically); the sovereign L1 is the
+**amount-private AND participation-gated consortium** posture. Same product, two points
+on the privacy spectrum — mastery of both Avalanche primitives, not a copy.
+
 ## Topology
 
 ```
@@ -38,15 +64,38 @@ chain-blocked; the keeper then enables them, and only then do member EOAs transa
 (bids, locks). That ordering is exactly the story: **you join the registry, the chain
 opens to you.**
 
+## Read-privacy: the READ_GATE member-gated read surface
+
+Write-gating (TxAllowList) stops non-members from *transacting*, but the market is also
+*observed* through the indexer's REST API (`/members`, `/bids`, `/events` expose WHO bid
+WHEN — the participation leak). On the L1 that read surface is **member-gated** too:
+
+- `services/indexer/index.mjs` installs a `readGate` middleware, active only when
+  `READ_GATE=1` (set by `demo/run_l1.sh`; unset on Fuji, so the middleware is a no-op and
+  Fuji stays the open hard-mode deployment). `/health` is always open (liveness).
+- A caller proves membership by signing a short-TTL challenge `window-read:<floor(now/30s)>`
+  (EIP-191 `personal_sign`) with a member EOA; the middleware recovers the address
+  (`ethers.verifyMessage`) and checks `MemberRegistry.isMember` (10 s cached — not an RPC
+  per request). Bad/expired sig or non-member ⇒ **403**.
+- **Scope / honesty**: this gates the **application** read surface (the actual market
+  observation channel). Node-level RPC restriction (validator-only) on a real
+  sovereign-testnet L1 is the production posture, not demoed on the single-node local
+  chain — do not claim more than the app-gate delivers. Copy says "non-members cannot
+  observe the market," never "nobody can see" (honest-claims guardrail).
+
 ## Files
 
 | File | What |
 |---|---|
 | `l1/genesis.json` | Subnet-EVM genesis: chainId 43117, feeConfig (20M gas limit), `txAllowListConfig`, prefunded anvil actors + one never-member "intruder" EOA (anvil #8) for the negative test |
 | `scripts/deploy_l1.sh` | DeployAll → `deployments/43117.json` (real verifiers; EPOCH_LEN=60, TENOR_BLOCKS=20) |
-| `services/allowlist/index.mjs` | the MemberRegistry → TxAllowList sync keeper |
-| `demo/run_l1.sh` | one-command orchestrator: deploy-if-needed → register → allowlist sync (waits for 5/5) → six services → runs the proof script. PID-tracked (`/tmp/window_l1_pids`), never touches the Fuji stack |
-| `demo/verify_l1_allowlist.mjs` | the proof: intruder role None + tx REJECTED at chain level; member role Enabled + tx mined; auction alive on the L1 |
+| `services/allowlist/index.mjs` | the MemberRegistry → TxAllowList sync keeper (write-gate) |
+| `services/indexer/index.mjs` | `READ_GATE` middleware — member-signature-gated reads (read-gate) |
+| `demo/run_l1.sh` | one-command orchestrator: deploy-if-needed → register → allowlist sync (waits for 5/5) → six services (`READ_GATE=1`) → runs the four proof scripts. PID-tracked (`/tmp/window_l1_pids`), never touches the Fuji stack |
+| `demo/verify_l1_allowlist.mjs` | write-gate proof: intruder role None + tx REJECTED at chain level; member role Enabled + tx mined; auction alive on the L1 |
+| `demo/verify_l1_readgate.mjs` | read-gate proof: anon read 403, non-member signed read 403, member signed read 200 |
+| `demo/verify_l1_revoke.mjs` | atomic revocation: one `removeMember` → market ✗ / eERC ✗ / network ✗ / observation ✗, then re-adds to restore the market |
+| `demo/what_a_competitor_sees.mjs` | side-by-side: public Fuji leaks participation; the L1 refuses the non-member |
 
 ## One-time L1 creation (documented in run_l1.sh header)
 

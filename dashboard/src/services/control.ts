@@ -27,6 +27,40 @@ export async function controlActors(): Promise<ControlActor[]> {
   return Array.isArray(list) ? list.map((a) => ({ ...a, address: a.address.toLowerCase() as Address })) : [];
 }
 
+// ---- permissioned-L1 surface ----
+export interface AllowlistRow {
+  address: Address;
+  label: string;
+  role: number; // 0 None · 1 Enabled · 2 Admin (TxAllowList precompile)
+  roleName: string;
+  isMember: boolean;
+}
+
+/** Live TxAllowList roles for the member set + intruder (Control reads the precompile). */
+export async function l1Allowlist(): Promise<{ precompile: string; rows: AllowlistRow[] }> {
+  const j = await req('/l1/allowlist', undefined, 'GET');
+  const rows: AllowlistRow[] = Array.isArray(j.rows)
+    ? j.rows.map((r: AllowlistRow) => ({ ...r, address: String(r.address).toLowerCase() as Address }))
+    : [];
+  return { precompile: String(j.precompile ?? ''), rows };
+}
+
+/** Mint a member-signed read token (null when the address is not a member → 403). */
+export async function mintReadToken(address: string): Promise<{ address: string; sig: string } | null> {
+  try {
+    const res = await fetch(`${CONTROL_URL}/member/read-token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address }),
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return j?.ok && j.sig ? { address: String(j.address), sig: String(j.sig) } : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function controlHealth(): Promise<boolean> {
   try {
     const j = await req('/health', undefined, 'GET');

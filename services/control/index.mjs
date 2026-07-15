@@ -4,8 +4,8 @@
 // Reads come from the indexer; this service only performs actions.
 import express from "express";
 import cors from "cors";
-import { handles } from "../lib/chain.mjs";
-import { ACTORS, AUDITOR, actorByAddress } from "../lib/actors.mjs";
+import { ethers, handles, provider } from "../lib/chain.mjs";
+import { ACTORS, AUDITOR, actorByAddress, MEMBER_NAMES } from "../lib/actors.mjs";
 import { ADMIN_PK, KEEPER_PK } from "../lib/roles.mjs";
 import * as member from "../lib/memberops.mjs";
 import * as admin from "../lib/adminops.mjs";
@@ -29,6 +29,51 @@ const t0 = () => Date.now();
 
 app.get("/health", (_q, r) => r.json({ ok: true }));
 app.get("/actors", (_q, r) => r.json(Object.values(ACTORS).map((a) => ({ name: a.name, address: a.address, role: a.role }))));
+
+// ---- permissioned-L1: read-gate token minting + live TxAllowList roles ----
+// The dashboard is keyless, so it can't sign the indexer's read challenge itself. For a
+// MEMBER it mints a member-signed token here (Control holds the member EOA keys); a
+// non-member gets 403 — which is exactly the read-gate demo contrast. Bucket + header
+// contract MUST match the READ_GATE middleware in services/indexer/index.mjs.
+const TXALLOWLIST = "0x0200000000000000000000000000000000000002";
+const ALLOWLIST_ABI = ["function readAllowList(address) view returns (uint256)"];
+const ROLE_NAME = ["None", "Enabled", "Admin"];
+
+app.post("/member/read-token", async (q, r) => {
+  try {
+    const address = String(q.body.address || "");
+    if (!ethers.isAddress(address)) return r.status(400).json({ ok: false, error: "bad address" });
+    const actor = actorByAddress(address);
+    const isMember = actor ? await handles().registry.isMember(address).catch(() => false) : false;
+    if (!actor || !isMember) return r.status(403).json({ ok: false, error: "not a member — the L1 read surface is member-gated" });
+    const bucket = Math.floor(Date.now() / 30000); // window-read:<floor(now/30s)>
+    const sig = await new ethers.Wallet(ACTORS[actor.name].pk).signMessage(`window-read:${bucket}`);
+    r.json({ ok: true, address: actor.address, sig, bucket });
+  } catch (e) { fail(r, e); }
+});
+
+app.get("/l1/allowlist", async (_q, r) => {
+  try {
+    const H = handles();
+    const allow = new ethers.Contract(TXALLOWLIST, ALLOWLIST_ABI, provider);
+    // ops roles + the five members + the never-member intruder (anvil #8) for the contrast
+    const roster = [
+      { name: "admin", label: "admin", address: ACTORS.admin?.address },
+      { name: "keeper", label: "keeper", address: ACTORS.keeper?.address },
+      { name: "operator", label: "operator", address: ACTORS.operator?.address },
+      ...MEMBER_NAMES.map((n) => ({ name: n, label: n, address: ACTORS[n]?.address })),
+      { name: "intruder", label: "intruder (never a member)", address: "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f" },
+    ].filter((x) => x.address);
+    const rows = await Promise.all(roster.map(async (x) => {
+      const [roleRaw, isMember] = await Promise.all([
+        allow.readAllowList(x.address).then((v) => Number(v)).catch(() => -1),
+        H.registry.isMember(x.address).catch(() => false),
+      ]);
+      return { address: x.address, label: x.label, role: roleRaw, roleName: ROLE_NAME[roleRaw] ?? "n/a", isMember };
+    }));
+    r.json({ ok: true, precompile: TXALLOWLIST, rows });
+  } catch (e) { fail(r, e); }
+});
 // the auditor PUBLIC key (the on-chain PoCD binding target) — never the scalar
 app.get("/auditor", (_q, r) => r.json({ ok: true, x: AUDITOR.pub[0].toString(), y: AUDITOR.pub[1].toString() }));
 

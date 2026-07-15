@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { ADAPTER_MODE } from '../config';
 import { useAdapterStore } from '../stores/useAdapterStore';
 import { useSessionStore } from '../stores/useSessionStore';
+import { setReadActor } from '../services/readAuth';
 import type { LiveAdapter } from '../lib/adapter/live/LiveAdapter';
 
 // Control bridge — in live mode the dashboard is a control + view surface. Writes are
@@ -15,6 +16,9 @@ export function useEercBridge() {
   useEffect(() => {
     if (ADAPTER_MODE !== 'live') return;
     let alive = true;
+    // Reflect the actor into the read-gate auth too, so gated L1 indexer reads carry a
+    // member-signed token (Control-minted). No-op on Fuji (READ_GATED off).
+    setReadActor(address);
     init().then((a) => {
       if (!alive || !a || a.mode !== 'live') return;
       (a as unknown as LiveAdapter).setActor(address);

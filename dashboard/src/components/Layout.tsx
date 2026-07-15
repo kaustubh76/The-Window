@@ -5,6 +5,7 @@ import { EpochProgress } from './ui/EpochProgress';
 import { ServicesBanner } from './ui/ServicesBanner';
 import { useWalletSync } from '../hooks/useWalletSync';
 import { useEercBridge } from '../hooks/useEercBridge';
+import { useL1AutoConnect } from '../hooks/useL1AutoConnect';
 import { useMarketData } from '../hooks/useMarketData';
 import { useMyData } from '../hooks/useMyData';
 import { useGlobalEvents } from '../hooks/useGlobalEvents';
@@ -14,6 +15,7 @@ export default function Layout() {
   const location = useLocation();
   useWalletSync();
   useEercBridge();
+  useL1AutoConnect();
   // Global liveness: hydrate market + session once here so every route is live
   // (header ticker, epoch bar, global toasts). Pages read from the stores.
   useMarketData();

@@ -8,6 +8,7 @@ import { ToastProvider } from './contexts/ToastContext';
 // Route-level code splitting.
 const MarketHome = lazy(() => import('./pages/MarketHome'));
 const Explorer = lazy(() => import('./pages/Explorer'));
+const L1 = lazy(() => import('./pages/L1'));
 const Methodology = lazy(() => import('./pages/Methodology'));
 const Diagnostics = lazy(() => import('./pages/Diagnostics'));
 const Console = lazy(() => import('./pages/Console'));
@@ -88,6 +89,7 @@ export default function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<MarketHome />} />
               <Route path="explorer" element={<Explorer />} />
+              <Route path="l1" element={<L1 />} />
               <Route path="methodology" element={<Methodology />} />
               <Route path="diagnostics" element={<Diagnostics />} />
               <Route path="app" element={<RoleGate need="member"><Console /></RoleGate>} />

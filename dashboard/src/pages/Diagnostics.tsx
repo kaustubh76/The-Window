@@ -4,7 +4,7 @@ import { Card, CardHeader } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { useMarketStore } from '../stores/useMarketStore';
 import { useAdapterStore } from '../stores/useAdapterStore';
-import { ADAPTER_MODE, PROFILE, CHAIN_ID, RPC_FUJI, INDEXER_URL, ADDRESSES } from '../config';
+import { ADAPTER_MODE, PROFILE, CHAIN_LABEL, IS_L1, RPC_FUJI, RPC_LOCAL, INDEXER_URL, ADDRESSES } from '../config';
 
 const GATE = [
   { k: 'Homomorphic accumulate', v: '≈ 13k gas', note: 'per-tick Σ Enc(size) via BabyJubJub._add' },
@@ -81,8 +81,8 @@ export default function Diagnostics() {
       </Card>
 
       <Card>
-        <CardHeader title="Chain & contracts" subtitle={`Fuji ${CHAIN_ID} · indexer ${INDEXER_URL}`} />
-        <div className="text-xs num text-gray-500 mb-3 break-all">RPC: {RPC_FUJI}</div>
+        <CardHeader title="Chain & contracts" subtitle={`${CHAIN_LABEL} · indexer ${INDEXER_URL}`} />
+        <div className="text-xs num text-gray-500 mb-3 break-all">RPC: {IS_L1 ? RPC_LOCAL : RPC_FUJI}</div>
         <div className="space-y-1">
           {addrRows.map(([k, v]) => (
             <div key={k} className="flex items-center justify-between py-1 border-b border-white/[0.03] last:border-0">

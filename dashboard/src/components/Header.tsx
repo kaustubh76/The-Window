@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { AppWindow, LineChart, Binary, LayoutDashboard, BookText, Activity, Menu, X, Landmark, Bot } from 'lucide-react';
+import { AppWindow, LineChart, Binary, LayoutDashboard, BookText, Activity, Menu, X, Landmark, Bot, Network } from 'lucide-react';
 import clsx from 'clsx';
 import ConnectWallet from './ConnectWallet';
 import ProfileSwitch from './ProfileSwitch';
@@ -10,6 +10,7 @@ import { useSessionStore } from '../stores/useSessionStore';
 const baseNav = [
   { path: '/', label: 'Market', icon: LineChart },
   { path: '/explorer', label: 'Explorer', icon: Binary },
+  { path: '/l1', label: 'L1', icon: Network },
   { path: '/app', label: 'Console', icon: LayoutDashboard },
   { path: '/methodology', label: 'Methodology', icon: BookText },
   { path: '/diagnostics', label: 'Diagnostics', icon: Activity },

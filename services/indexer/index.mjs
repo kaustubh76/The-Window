@@ -5,7 +5,7 @@
 // ranges, and rescanning deploy->head every tick grows without bound on Fuji.
 import express from "express";
 import cors from "cors";
-import { provider, handles, queryAll, START_BLOCK } from "../lib/chain.mjs";
+import { provider, handles, queryAll, START_BLOCK, ethers } from "../lib/chain.mjs";
 
 const PORT = Number(process.env.INDEXER_PORT || 8787);
 const NO_TRADE = 65535;
@@ -235,13 +235,20 @@ async function rebuild() {
     if (ev.fragment.name === "MemberAdded") activeSet.add(who);
     else activeSet.delete(who);
   }
-  const members = logs.memberAdded.map((ev) => ({
-    address: ev.args.who.toLowerCase(),
-    simulated: true, // all demo members are simulated
-    active: activeSet.has(ev.args.who.toLowerCase()),
-    joinedEpoch: Number(ev.args.joinedEpoch),
-    roles: ["public"],
-  }));
+  // Dedupe by address — a remove→re-add (e.g. the atomic-revoke demo) emits a second
+  // MemberAdded; keyed insertion in chain order keeps one row per member (latest add wins).
+  const memberMap = new Map();
+  for (const ev of logs.memberAdded) {
+    const who = ev.args.who.toLowerCase();
+    memberMap.set(who, {
+      address: who,
+      simulated: true, // all demo members are simulated
+      active: activeSet.has(who),
+      joinedEpoch: Number(ev.args.joinedEpoch),
+      roles: ["public"],
+    });
+  }
+  const members = [...memberMap.values()];
 
   // atomic publish — no awaits between these assignments
   state.epochs = epochs;
@@ -257,6 +264,53 @@ async function rebuild() {
 
 const app = express();
 app.use(cors());
+
+// ---- READ_GATE: member-gated read surface (permissioned-L1 only) -------------
+// eERC hides amounts; it does NOT hide participation — the open endpoints below
+// (/members, /bids, /events) reveal WHO bid WHEN, which is the stigma leak eERC
+// can't close on a public chain. On the sovereign L1, membership IS chain access,
+// so the market's own read surface is member-gated too: a caller proves membership
+// by signing a short-TTL challenge with a member EOA. Env-flagged (READ_GATE=1),
+// so Fuji stays the open, honest hard-mode deployment (middleware is a no-op there).
+// SCOPE: this gates the APPLICATION read surface (the actual market-observation
+// channel). Node-level RPC restriction (validator-only) is the production posture.
+const READ_GATE = process.env.READ_GATE === "1";
+const CHALLENGE_TTL_S = 30; // buckets; the verifier accepts the current + previous
+const memberCache = new Map(); // addr(lowercase) -> { ok, exp }
+async function isMemberCached(addr) {
+  const now = Date.now();
+  const hit = memberCache.get(addr);
+  if (hit && hit.exp > now) return hit.ok;
+  let ok = false;
+  try { ok = await H.registry.isMember(addr); } catch { ok = false; }
+  memberCache.set(addr, { ok, exp: now + 10_000 }); // 10s TTL — not an RPC per request
+  return ok;
+}
+// Challenge the client signs: `window-read:<floor(now/30s)>` (EIP-191 personal_sign).
+export function readChallenge(nowMs = Date.now()) {
+  return `window-read:${Math.floor(nowMs / (CHALLENGE_TTL_S * 1000))}`;
+}
+async function readGate(req, res, next) {
+  if (!READ_GATE || req.path === "/health") return next();
+  const sig = String(req.get("x-window-sig") || "");
+  const claimed = String(req.get("x-window-address") || "").toLowerCase();
+  if (!sig) return res.status(403).json({ error: "membership required: sign the read challenge (x-window-sig)" });
+  const bucket = Math.floor(Date.now() / (CHALLENGE_TTL_S * 1000));
+  let who = null;
+  for (const b of [bucket, bucket - 1]) { // tolerate up to ~60s of skew / a bucket rollover
+    try {
+      const rec = ethers.verifyMessage(`window-read:${b}`, sig).toLowerCase();
+      if (!claimed || claimed === rec) { who = rec; break; }
+    } catch { /* try previous bucket */ }
+  }
+  if (!who) return res.status(403).json({ error: "bad or expired read signature" });
+  if (!(await isMemberCached(who))) {
+    return res.status(403).json({ error: "not a member — the L1 read surface is member-gated" });
+  }
+  next();
+}
+app.use(readGate);
+if (READ_GATE) console.log("[indexer] READ_GATE on — member signature required for all reads except /health");
 
 app.get("/health", (_req, res) => res.json({ ok: true, lastBlock: state.lastBlock }));
 
