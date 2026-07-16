@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronDown, Coins, Banknote, Landmark, Bot, FlaskConical, Loader2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useSessionStore } from '../stores/useSessionStore';
+import { useToast } from '../contexts/ToastContext';
 import { SIM_MEMBERS, SIM_ADMIN, SIM_KEEPER } from '../lib/adapter/mock/members';
 import { controlActors, rolesForActor } from '../services/control';
 import { ADAPTER_MODE } from '../config';
@@ -37,6 +39,8 @@ const MOCK_OPTIONS: Option[] = [
 // MUST be one of these for server-side writes to resolve.
 export default function PersonaSwitcher() {
   const connect = useSessionStore((s) => s.connect);
+  const navigate = useNavigate();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [liveOpts, setLiveOpts] = useState<Option[] | null>(ADAPTER_MODE === 'live' ? null : MOCK_OPTIONS);
   const ref = useRef<HTMLDivElement>(null);
@@ -98,6 +102,15 @@ export default function PersonaSwitcher() {
                 onClick={() => {
                   connect(o.address as `0x${string}`, 'persona', o.roles, o.label);
                   setOpen(false);
+                  // No dead end: land on the desk and prompt the next step.
+                  const isMember = o.roles.includes('lender') || o.roles.includes('borrower');
+                  if (isMember) {
+                    navigate('/app');
+                    toast.info(`Connected as ${o.label} — next: register your key`);
+                  } else {
+                    navigate(o.roles.includes('admin') ? '/ops/admin' : o.roles.includes('keeper') ? '/ops/keeper' : '/app');
+                    toast.info(`Connected as ${o.label}`);
+                  }
                 }}
                 className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg hover:bg-white/[0.05] transition-colors text-left"
               >

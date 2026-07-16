@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { Activity, Layers, Users, Landmark, ArrowRight, Binary } from 'lucide-react';
 import { useMarketStore } from '../stores/useMarketStore';
+import { useSessionStore } from '../stores/useSessionStore';
+import { JourneyStepper } from '../components/journey/JourneyStepper';
 import { useClock } from '../hooks/useClock';
 import { Card, CardHeader } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
@@ -19,6 +21,7 @@ import { TAGLINE } from '../config';
 export default function MarketHome() {
   const clock = useClock();
   const { latestMonia, history, depth, members, loanBook } = useMarketStore();
+  const connected = useSessionStore((s) => !!s.address);
 
   const active = loanBook.filter((l) => l.status === 'Active').length;
   const repaid = loanBook.filter((l) => l.status === 'Repaid').length;
@@ -71,12 +74,18 @@ export default function MarketHome() {
               </div>
             )}
             <p className="text-sm text-gray-500 italic pt-2 border-t border-white/[0.06]">“{TAGLINE}”</p>
-            <Link to="/explorer" className="btn btn-outline w-full flex items-center justify-center gap-2 mt-1">
+            <Link to="/app" className="btn btn-primary w-full flex items-center justify-center gap-2 mt-1">
+              {connected ? 'Go to your desk' : 'Enter the market'} <ArrowRight className="w-4 h-4" />
+            </Link>
+            <Link to="/explorer" className="btn btn-outline w-full flex items-center justify-center gap-2">
               <Binary className="w-4 h-4" /> Open Explorer
             </Link>
           </div>
         </div>
       </Card>
+
+      {/* Your next step (only once you've stepped into a persona) */}
+      {connected && <JourneyStepper compact />}
 
       {/* Depth + side rail */}
       <div className="grid lg:grid-cols-[1.6fr_1fr] gap-6">

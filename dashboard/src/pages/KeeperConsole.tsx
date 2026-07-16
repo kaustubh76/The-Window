@@ -1,4 +1,5 @@
-import { Timer, Gavel, AlertTriangle } from 'lucide-react';
+import { useState } from 'react';
+import { Timer, Gavel, AlertTriangle, Loader2 } from 'lucide-react';
 import { Card, CardHeader } from '../components/ui/Card';
 import { StatusPill } from '../components/ui/StatusPill';
 import { Countdown } from '../components/ui/Countdown';
@@ -18,16 +19,22 @@ export default function KeeperConsole() {
 
   const active = loanBook.filter((l) => l.status === 'Active');
   const now = clock?.now ?? 0;
+  const [closing, setClosing] = useState(false);
+  const [seizing, setSeizing] = useState<string | null>(null);
 
   const closeEpoch = async () => {
     if (!adapter || !clock) return;
-    const res = await adapter.closeEpoch(clock.epoch);
-    toast.success(`Closed epoch ${clock.epoch}`, res.txHash);
+    setClosing(true);
+    try { const res = await adapter.closeEpoch(clock.epoch); toast.success(`Closed epoch ${clock.epoch}`, res.txHash); }
+    catch { toast.error('Close failed'); }
+    finally { setClosing(false); }
   };
   const seize = async (id: string) => {
     if (!adapter) return;
-    const res = await adapter.seize(id);
-    toast.success(`Seized collateral for ${id}`, res.txHash);
+    setSeizing(id);
+    try { const res = await adapter.seize(id); toast.success(`Seized collateral for ${id}`, res.txHash); }
+    catch { toast.error('Seize failed'); }
+    finally { setSeizing(null); }
   };
 
   return (
@@ -45,7 +52,9 @@ export default function KeeperConsole() {
         />
         {clock?.status === 'Open' ? (
           <div className="flex items-center gap-3">
-            <button onClick={closeEpoch} className="btn btn-primary">Close epoch now</button>
+            <button onClick={closeEpoch} disabled={closing} className="btn btn-primary inline-flex items-center gap-2">
+              {closing && <Loader2 className="w-4 h-4 animate-spin" />} {closing ? 'Closing…' : 'Close epoch now'}
+            </button>
             <Countdown targetMs={clock.closesAt} label="auto-closes in" className="text-sm" />
           </div>
         ) : (
@@ -75,11 +84,11 @@ export default function KeeperConsole() {
                     <Countdown targetMs={l.deadlineAt} label="deadline" className="text-xs" />
                     <button
                       onClick={() => seize(l.id)}
-                      disabled={!overdue}
+                      disabled={!overdue || seizing === l.id}
                       className="btn btn-secondary text-xs !py-1.5 flex items-center gap-1.5 disabled:opacity-40"
                       title={overdue ? 'Seize collateral' : 'Not yet past deadline'}
                     >
-                      <AlertTriangle className="w-3.5 h-3.5" /> Seize
+                      {seizing === l.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <AlertTriangle className="w-3.5 h-3.5" />} Seize
                     </button>
                   </div>
                 </div>

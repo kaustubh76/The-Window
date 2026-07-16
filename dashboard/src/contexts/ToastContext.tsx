@@ -1,20 +1,27 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { X, AlertCircle, CheckCircle, Info, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { X, AlertCircle, CheckCircle, Info, AlertTriangle, ExternalLink, ArrowRight } from 'lucide-react';
 import { SNOWTRACE_URL } from '../config';
 import { EXPLORER_TX } from '../constants/ui';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
+export interface ToastAction {
+  label: string;
+  to?: string; // in-app route (react-router)
+  onClick?: () => void;
+}
 
 interface Toast {
   id: string;
   message: string;
   type: ToastType;
   txHash?: string; // when set, the toast shows a "View tx ↗" Snowtrace link
+  action?: ToastAction; // optional next-action (e.g. "See it in Explorer →")
 }
 
 interface ToastContextValue {
-  showToast: (message: string, type?: ToastType, txHash?: string) => void;
-  success: (message: string, txHash?: string) => void;
+  showToast: (message: string, type?: ToastType, txHash?: string, action?: ToastAction) => void;
+  success: (message: string, txHash?: string, action?: ToastAction) => void;
   error: (message: string) => void;
   info: (message: string) => void;
   warning: (message: string) => void;
@@ -43,15 +50,15 @@ let counter = 0;
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const showToast = useCallback((message: string, type: ToastType = 'info', txHash?: string) => {
+  const showToast = useCallback((message: string, type: ToastType = 'info', txHash?: string, action?: ToastAction) => {
     const id = `t-${counter++}`;
-    setToasts((prev) => [...prev, { id, message, type, txHash }]);
+    setToasts((prev) => [...prev, { id, message, type, txHash, action }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, TOAST_DURATION);
   }, []);
 
-  const success = useCallback((m: string, txHash?: string) => showToast(m, 'success', txHash), [showToast]);
+  const success = useCallback((m: string, txHash?: string, action?: ToastAction) => showToast(m, 'success', txHash, action), [showToast]);
   const error = useCallback((m: string) => showToast(m, 'error'), [showToast]);
   const info = useCallback((m: string) => showToast(m, 'info'), [showToast]);
   const warning = useCallback((m: string) => showToast(m, 'warning'), [showToast]);
@@ -76,16 +83,35 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               </div>
               <div className="flex-1 pt-0.5">
                 <p className="text-sm font-medium text-white leading-relaxed">{toast.message}</p>
-                {toast.txHash && (
-                  <a
-                    href={EXPLORER_TX(toast.txHash, SNOWTRACE_URL)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-[11px] num text-benchmark-400 hover:text-benchmark-300 transition-colors"
-                  >
-                    <ExternalLink className="w-3 h-3" /> View tx {toast.txHash.slice(0, 6)}…{toast.txHash.slice(-4)}
-                  </a>
-                )}
+                <div className="flex items-center gap-3 mt-1">
+                  {toast.action &&
+                    (toast.action.to ? (
+                      <Link
+                        to={toast.action.to}
+                        onClick={() => removeToast(toast.id)}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-benchmark-400 hover:text-benchmark-300 transition-colors"
+                      >
+                        {toast.action.label} <ArrowRight className="w-3 h-3" />
+                      </Link>
+                    ) : (
+                      <button
+                        onClick={() => { toast.action?.onClick?.(); removeToast(toast.id); }}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-benchmark-400 hover:text-benchmark-300 transition-colors"
+                      >
+                        {toast.action.label} <ArrowRight className="w-3 h-3" />
+                      </button>
+                    ))}
+                  {toast.txHash && (
+                    <a
+                      href={EXPLORER_TX(toast.txHash, SNOWTRACE_URL)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] num text-benchmark-400 hover:text-benchmark-300 transition-colors"
+                    >
+                      <ExternalLink className="w-3 h-3" /> View tx {toast.txHash.slice(0, 6)}…{toast.txHash.slice(-4)}
+                    </a>
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => removeToast(toast.id)}

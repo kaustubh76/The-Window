@@ -1,6 +1,7 @@
 import { Landmark } from 'lucide-react';
 import { StatTile } from '../components/ui/StatTile';
 import { LoanCard } from '../components/ui/LoanCard';
+import { EmptyState } from '../components/ui/EmptyState';
 import { HonestClaimsCallout } from '../components/ui/HonestClaimsCallout';
 import { usePositionsStore } from '../stores/usePositionsStore';
 import { useSessionStore } from '../stores/useSessionStore';
@@ -30,8 +31,13 @@ export default function PositionsPage() {
       </div>
 
       {myLoans.length === 0 ? (
-        <div className="card text-center py-14">
-          <p className="text-gray-400 text-sm">No loans yet. Submit bids in the <span className="text-benchmark-400">Auction</span> — matched loans appear here after the next print.</p>
+        <div className="card">
+          <EmptyState
+            icon={Landmark}
+            title="No positions yet"
+            body="Place a bid to lend or borrow — matched loans appear here after the next M-ONIA print."
+            cta={{ label: 'Place your first bid', to: '/app/auction' }}
+          />
         </div>
       ) : (
         <>

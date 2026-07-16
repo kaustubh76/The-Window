@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Droplet, KeyRound, ArrowDownUp, Wallet, ShieldCheck } from 'lucide-react';
+import { Droplet, KeyRound, ArrowDownUp, Wallet, ShieldCheck, Loader2 } from 'lucide-react';
 import { Card, CardHeader } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { EncryptedValue } from '../components/ui/EncryptedValue';
 import { RevealButton } from '../components/ui/RevealButton';
+import { AmountInput } from '../components/ui/AmountInput';
 import { ProofState } from '../components/ui/ProofState';
 import { HonestClaimsCallout } from '../components/ui/HonestClaimsCallout';
 import { usePositionsStore } from '../stores/usePositionsStore';
@@ -27,6 +28,7 @@ export default function WalletPage() {
   const unwrapTx = useTx();
   const [wrapAmt, setWrapAmt] = useState('');
   const [unwrapAmt, setUnwrapAmt] = useState('');
+  const [funding, setFunding] = useState(false);
 
   const doRegister = async () => {
     if (!adapter) return;
@@ -38,8 +40,10 @@ export default function WalletPage() {
   };
   const doFaucet = async () => {
     if (!adapter) return;
-    const res = await adapter.faucet(address, 1000_000000n);
-    toast.success('+1,000 TestUSDC', res.txHash);
+    setFunding(true);
+    try { const res = await adapter.faucet(address, 1000_000000n); toast.success('+1,000 TestUSDC', res.txHash); }
+    catch { toast.error('Faucet failed'); }
+    finally { setFunding(false); }
   };
   const doWrap = async () => {
     if (!adapter) return;
@@ -117,20 +121,22 @@ export default function WalletPage() {
       <Card>
         <CardHeader title={<span className="flex items-center gap-2"><Droplet className="w-4 h-4 text-cipher-300" /> Fund & wrap</span>} subtitle="Get TestUSDC, then wrap it into your encrypted balance" />
         <div className="flex items-center gap-2 mb-4">
-          <button onClick={doFaucet} className="btn btn-secondary flex items-center gap-2">
-            <Droplet className="w-4 h-4" /> Faucet +1,000
+          <button onClick={doFaucet} disabled={funding} className="btn btn-secondary flex items-center gap-2">
+            {funding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Droplet className="w-4 h-4" />} Faucet +1,000
           </button>
           <span className="text-xs text-gray-500">Public balance: <span className="num text-white">{balances ? formatUsdc(balances.usdcErc20) : '—'}</span></span>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            className="input num flex-1"
-            placeholder="Amount to wrap"
-            value={wrapAmt}
-            onChange={(e) => setWrapAmt(e.target.value)}
-            inputMode="decimal"
-            disabled={!registered}
-          />
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <AmountInput
+              value={wrapAmt}
+              onChange={setWrapAmt}
+              max={balances?.usdcErc20 ?? null}
+              placeholder="Amount to wrap"
+              disabled={!registered}
+              preview={wrapAmt ? `Wrap ${wrapAmt} USDC into your encrypted balance` : undefined}
+            />
+          </div>
           <button onClick={doWrap} disabled={!registered || wrapTx.running || !wrapAmt} className="btn btn-primary">
             Wrap →
           </button>
@@ -153,14 +159,16 @@ export default function WalletPage() {
             <EncryptedValue value={balances?.eercEncrypted} size="lg" />
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            className="input num flex-1"
-            placeholder="Amount to unwrap"
-            value={unwrapAmt}
-            onChange={(e) => setUnwrapAmt(e.target.value)}
-            inputMode="decimal"
-          />
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <AmountInput
+              value={unwrapAmt}
+              onChange={setUnwrapAmt}
+              max={revealed ?? balances?.eercClear ?? null}
+              placeholder="Amount to unwrap"
+              preview={unwrapAmt ? `Unwrap ${unwrapAmt} back to public TestUSDC` : undefined}
+            />
+          </div>
           <button onClick={doUnwrap} disabled={unwrapTx.running || !unwrapAmt} className="btn btn-secondary">
             ← Unwrap (proof)
           </button>
