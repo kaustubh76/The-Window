@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Wallet, Gavel, Landmark, ArrowRight, ShieldCheck } from 'lucide-react';
+import { JourneyStepper } from '../components/journey/JourneyStepper';
 import { Card, CardHeader } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { EncryptedValue } from '../components/ui/EncryptedValue';
@@ -41,9 +42,11 @@ export default function Console() {
     <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">{label ?? 'Console'}</h1>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Your Desk</h1>
           <p className="text-gray-400 text-sm mt-1">
-            {registered ? 'Registered ✓' : 'Not registered — set up your encryption key in Wallet.'}
+            {label ? <span className="text-gray-300">{label}</span> : null}
+            {label ? ' · ' : ''}
+            {registered ? <span className="text-signal-up">key registered ✓</span> : 'follow the steps below to start trading'}
           </p>
         </div>
         {clock && (
@@ -56,6 +59,9 @@ export default function Console() {
           </div>
         )}
       </div>
+
+      {/* Guided journey — the primary call-to-action hero */}
+      <JourneyStepper />
 
       <div className="grid sm:grid-cols-3 gap-3">
         <StatTile label="TestUSDC" value={balances ? formatUsdc(balances.usdcErc20) : '—'} icon={Wallet} sub="public" />
@@ -93,7 +99,9 @@ export default function Console() {
         <Card>
           <CardHeader title="Open bids" right={<Link to="/app/auction" className="text-xs text-benchmark-400 hover:text-benchmark-300">Auction →</Link>} />
           {myBids.length === 0 ? (
-            <p className="text-sm text-gray-600">No open bids.</p>
+            <Link to="/app/auction" className="text-sm text-gray-500 hover:text-benchmark-400 inline-flex items-center gap-1.5">
+              No open bids — place one <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           ) : (
             <div className="space-y-1.5">
               {myBids.slice(0, 4).map((b) => (
@@ -109,7 +117,9 @@ export default function Console() {
         <Card>
           <CardHeader title="Open loans" right={<Link to="/app/positions" className="text-xs text-benchmark-400 hover:text-benchmark-300">Positions →</Link>} />
           {activeLoans.length === 0 ? (
-            <p className="text-sm text-gray-600">No open loans.</p>
+            <Link to="/app/auction" className="text-sm text-gray-500 hover:text-benchmark-400 inline-flex items-center gap-1.5">
+              No open loans — bid to borrow <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           ) : (
             <div className="space-y-1.5">
               {activeLoans.slice(0, 4).map((l) => (

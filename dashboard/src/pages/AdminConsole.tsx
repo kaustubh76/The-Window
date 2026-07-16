@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyRound, Calculator, ShieldCheck, Send, GitMerge, Check } from 'lucide-react';
+import { KeyRound, Calculator, ShieldCheck, Send, GitMerge, Check, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
 import { Card } from '../components/ui/Card';
 import { ProofState } from '../components/ui/ProofState';
@@ -24,20 +24,23 @@ export default function AdminConsole() {
   const [rStar, setRStar] = useState<number | null | undefined>(undefined);
   const [print, setPrint] = useState<MoniaPrint | null>(null);
   const [matches, setMatches] = useState<number | null>(null);
+  const [busy, setBusy] = useState<number | null>(null); // which non-proof step is running
 
   const target = epoch ?? clock?.epoch ?? 0;
 
   const step1 = async () => {
     if (!adapter) return;
-    setEpoch(target);
-    const d = await adapter.adminDecryptAggregates(target);
-    setDepth(d);
-    toast.info(`Decrypted ${d.length} tick aggregates for epoch ${target}`);
+    setBusy(1); setEpoch(target);
+    try { const d = await adapter.adminDecryptAggregates(target); setDepth(d); toast.info(`Decrypted ${d.length} tick aggregates for epoch ${target}`); }
+    catch { toast.error('Decrypt failed'); }
+    finally { setBusy(null); }
   };
   const step2 = async () => {
     if (!adapter) return;
-    const { rStarBps } = await adapter.adminComputeClearing(target);
-    setRStar(rStarBps);
+    setBusy(2);
+    try { const { rStarBps } = await adapter.adminComputeClearing(target); setRStar(rStarBps); }
+    catch { toast.error('Compute failed'); }
+    finally { setBusy(null); }
   };
   const step3 = async () => {
     if (!adapter) return;
@@ -49,13 +52,14 @@ export default function AdminConsole() {
   };
   const step4 = async () => {
     if (!adapter) return;
-    const res = await adapter.adminPostMatches(target);
-    setMatches(res.loans.length);
-    toast.success(`Posted ${res.loans.length} matches`);
+    setBusy(4);
+    try { const res = await adapter.adminPostMatches(target); setMatches(res.loans.length); toast.success(`Posted ${res.loans.length} matches`); }
+    catch { toast.error('Post matches failed'); }
+    finally { setBusy(null); }
   };
 
-  const Step = ({ n, title, icon: Icon, done, children, onRun, runLabel, disabled }: {
-    n: number; title: string; icon: typeof KeyRound; done: boolean; children?: React.ReactNode; onRun?: () => void; runLabel: string; disabled?: boolean;
+  const Step = ({ n, title, icon: Icon, done, children, onRun, runLabel, disabled, busy: stepBusy }: {
+    n: number; title: string; icon: typeof KeyRound; done: boolean; children?: React.ReactNode; onRun?: () => void; runLabel: string; disabled?: boolean; busy?: boolean;
   }) => (
     <Card className={clsx('!p-4', done && 'border-signal-up/20')}>
       <div className="flex items-center justify-between">
@@ -69,8 +73,8 @@ export default function AdminConsole() {
           </div>
         </div>
         {onRun && (
-          <button onClick={onRun} disabled={disabled} className="btn btn-secondary text-xs !py-1.5">
-            {runLabel}
+          <button onClick={onRun} disabled={disabled || stepBusy} className="btn btn-secondary text-xs !py-1.5 inline-flex items-center gap-1.5">
+            {stepBusy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {runLabel}
           </button>
         )}
       </div>
@@ -91,7 +95,7 @@ export default function AdminConsole() {
         <span className="text-xs text-gray-600 ml-auto">clock: epoch #{clock?.epoch} · {clock?.status}</span>
       </div>
 
-      <Step n={1} title="Decrypt per-tick aggregates" icon={KeyRound} done={!!depth} onRun={step1} runLabel="Decrypt">
+      <Step n={1} title="Decrypt per-tick aggregates" icon={KeyRound} done={!!depth} onRun={step1} runLabel="Decrypt" busy={busy === 1} disabled={busy !== null}>
         {depth && (
           <div className="max-h-40 overflow-y-auto text-xs num">
             <div className="grid grid-cols-3 gap-2 text-gray-500 pb-1 border-b border-white/[0.06]">
@@ -108,7 +112,7 @@ export default function AdminConsole() {
         )}
       </Step>
 
-      <Step n={2} title="Compute uniform clearing rate r*" icon={Calculator} done={rStar !== undefined} onRun={step2} runLabel="Compute" disabled={!depth}>
+      <Step n={2} title="Compute uniform clearing rate r*" icon={Calculator} done={rStar !== undefined} onRun={step2} runLabel="Compute" busy={busy === 2} disabled={!depth || busy !== null}>
         {rStar !== undefined && (
           <div className="text-sm">
             {rStar === null ? (
@@ -131,7 +135,7 @@ export default function AdminConsole() {
         )}
       </Step>
 
-      <Step n={4} title="Post matches to LoanBook" icon={GitMerge} done={matches !== null} onRun={step4} runLabel="Post matches" disabled={!print}>
+      <Step n={4} title="Post matches to LoanBook" icon={GitMerge} done={matches !== null} onRun={step4} runLabel="Post matches" busy={busy === 4} disabled={!print || busy !== null}>
         {matches !== null && <span className="text-sm text-signal-up">✓ {matches} loans created (no plaintext size on-chain)</span>}
       </Step>
 

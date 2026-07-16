@@ -1,21 +1,26 @@
-import { Lock, ArrowRight, Radio } from 'lucide-react';
+import clsx from 'clsx';
+import { Lock, ArrowRight, Radio, Eye } from 'lucide-react';
 import { useMarketStore } from '../stores/useMarketStore';
+import { useSessionStore } from '../stores/useSessionStore';
 import { useEventFeed } from '../hooks/useEventFeed';
 import { MoniaTicker } from '../components/ui/MoniaTicker';
 import { DepthChart } from '../components/ui/DepthChart';
 import { shortAddr } from '../components/ui/AddressChip';
 import { TxLink } from '../components/ui/TxLink';
 import { bpsToPctLabel, tickToBps } from '../lib/rates';
+import { formatUsdc } from '../lib/usdc';
 import { TAGLINE } from '../config';
 import type { WindowEvent } from '../lib/adapter/types';
 
 const trunc = (s: string) => (s.length > 12 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s);
 
-function EventRow({ e }: { e: WindowEvent }) {
+function EventRow({ e, myAddress }: { e: WindowEvent; myAddress?: string | null }) {
   switch (e.type) {
-    case 'BidSubmitted':
+    case 'BidSubmitted': {
+      const mine = !!myAddress && e.by?.toLowerCase() === myAddress.toLowerCase();
+      const clear = e.cipher.clear; // populated only for the entitled owner
       return (
-        <div className="py-1.5 border-b border-white/[0.04] animate-fade-in-down">
+        <div className={clsx('py-1.5 border-b border-white/[0.04] animate-fade-in-down', mine && '-mx-2 px-2 rounded-lg bg-benchmark-500/[0.06] border-benchmark-500/25')}>
           <div className="flex items-center gap-2 text-[11px]">
             <span className={e.side === 'ask' ? 'text-signal-up' : 'text-benchmark-400'}>
               {e.side === 'ask' ? 'ASK' : 'BID'}
@@ -24,11 +29,22 @@ function EventRow({ e }: { e: WindowEvent }) {
             <span className="text-white num">{bpsToPctLabel(tickToBps(e.tick))}</span>
             <span className="text-gray-600">·</span>
             <span className="num text-gray-500">{shortAddr(e.by)}</span>
-            {!e.simulated && <span className="text-[9px] text-cipher-400">you</span>}
-            <span className="ml-auto inline-flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 text-cipher-400">
-                <Lock className="w-3 h-3" /> amount encrypted
+            {mine && (
+              <span className="relative inline-flex items-center">
+                <span className="text-[9px] uppercase tracking-wider text-benchmark-400 font-semibold">you</span>
+                <span className="absolute -right-1.5 top-0 w-1.5 h-1.5 rounded-full bg-benchmark-400 animate-ping-slow" />
               </span>
+            )}
+            <span className="ml-auto inline-flex items-center gap-2">
+              {mine && clear != null ? (
+                <span className="inline-flex items-center gap-1 text-benchmark-300 num" title="Only you can decrypt your own size">
+                  <Eye className="w-3 h-3" /> {formatUsdc(clear)} USDC
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-cipher-400">
+                  <Lock className="w-3 h-3" /> amount encrypted
+                </span>
+              )}
               <TxLink hash={e.txHash} />
             </span>
           </div>
@@ -37,6 +53,7 @@ function EventRow({ e }: { e: WindowEvent }) {
           </div>
         </div>
       );
+    }
     case 'PrivateTransfer':
       return (
         <div className="py-1.5 border-b border-white/[0.04] animate-fade-in-down">
@@ -115,6 +132,7 @@ function EventRow({ e }: { e: WindowEvent }) {
 
 export default function Explorer() {
   const { latestMonia, history, depth } = useMarketStore();
+  const myAddress = useSessionStore((s) => s.address);
   const feed = useEventFeed();
   const shown = [...feed].reverse().slice(0, 20);
 
@@ -134,7 +152,7 @@ export default function Explorer() {
           <div className="space-y-0 min-h-[380px] max-h-[440px] overflow-y-auto font-mono">
             {shown.length === 0 && <p className="text-xs text-gray-600">Waiting for encrypted orders…</p>}
             {shown.map((e, i) => (
-              <EventRow key={`${i}-${e.type}`} e={e} />
+              <EventRow key={`${i}-${e.type}`} e={e} myAddress={myAddress} />
             ))}
           </div>
         </div>
