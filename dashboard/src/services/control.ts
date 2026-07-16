@@ -45,6 +45,47 @@ export async function l1Allowlist(): Promise<{ precompile: string; rows: Allowli
   return { precompile: String(j.precompile ?? ''), rows };
 }
 
+export interface RevokeStep {
+  key: string;
+  label: string;
+  ok: boolean;
+}
+export interface RevokeDemoResult {
+  ok: boolean;
+  subject?: { name: string; address: string };
+  steps?: RevokeStep[];
+  restored?: boolean;
+  error?: string;
+}
+
+/** Run the live atomic revocation on the L1 (removeMember → 4 layers ✗ → restore). */
+export async function runRevokeDemo(address?: string): Promise<RevokeDemoResult> {
+  try {
+    return (await req('/l1/revoke-demo', { address }, 'POST')) as RevokeDemoResult;
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'revoke-demo failed' };
+  }
+}
+
+export interface L1Info {
+  ok: boolean;
+  chainId?: number;
+  block?: number;
+  networkID?: number | null;
+  anchor?: 'fuji' | 'mainnet' | 'local';
+  nodeID?: string | null;
+  blockchainId?: string | null;
+}
+
+/** Live chain identity — proves Fuji-anchoring (networkID 5) vs a local network. */
+export async function l1Info(): Promise<L1Info> {
+  try {
+    return (await req('/l1/info', undefined, 'GET')) as L1Info;
+  } catch {
+    return { ok: false };
+  }
+}
+
 /** Mint a member-signed read token (null when the address is not a member → 403). */
 export async function mintReadToken(address: string): Promise<{ address: string; sig: string } | null> {
   try {

@@ -69,6 +69,9 @@ export const INDEXER_URL = env.VITE_INDEXER_URL ?? '/api';
 // (proven eerc-node flows) for the disclosed simulated members. See services/control.
 export const CONTROL_URL = env.VITE_CONTROL_URL ?? 'http://127.0.0.1:8899';
 export const SNOWTRACE_URL = env.VITE_SNOWTRACE_URL ?? 'https://testnet.snowtrace.io';
+// The live hosted Fuji indexer — read by the /l1 competitor pane to show the REAL
+// participation leak on a public chain (both indexers send permissive CORS).
+export const FUJI_INDEXER_URL = env.VITE_FUJI_INDEXER_URL ?? 'https://window-indexer.onrender.com';
 
 // ---- deployed addresses (live mode) ----
 export const ADDRESSES = {

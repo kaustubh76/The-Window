@@ -160,11 +160,58 @@ non-members cannot even transact on).
    --local` restarts the local node to track the new chain — do the one-time
    create+deploy FIRST, then deploy contracts / start services (run_l1.sh's order).
 
+## Sovereign-testnet run — Fuji-anchored (2026-07-16, VERIFIED)
+
+The stretch above the local demo: `thewindowl1` promoted to a **real sovereign L1 on
+Fuji**, validated by an avalanchego node that tracks it on the Fuji primary network.
+Same genesis (chainId 43117), same stack — only the validator/anchoring changes.
+
+**Route: local machine as the bootstrap validator** (no cloud creds). Steps run:
+
+1. **Deployer key** = `windowdeployer` (the faucet-fed wallet `0xFc46…79aD`), imported
+   into avalanche-cli. Funded its **P-Chain** with its *own* C→P transfer
+   (`avalanche key transfer --key windowdeployer --c-chain-sender --p-chain-receiver
+   --destination-key windowdeployer --amount 0.42 --fuji`) → **0.42 AVAX on P** (no
+   faucet, no draining the market's gas accounts).
+2. **Local Fuji node**: `avalanche node local start windowfuji --fuji --partial-sync`
+   (partial-sync + the cached public archive ⇒ bootstrap in ~5–8 min; healthy at 62
+   peers). NodeID `NodeID-9HzTZNnjEwX5jFBUnDkB1bHdLtm313KsD`.
+3. **Deploy**: `avalanche blockchain deploy thewindowl1 --fuji -k windowdeployer
+   --use-local-machine --num-bootstrap-validators 1 --balance 0.3`. Fees: CreateSubnet
+   ~0.00001, ConvertSubnetToL1 ~0.000037; the **`--balance 0.3`** is the validator's
+   P-Chain continuous-fee prepayment (P after deploy ≈ 0.12). PoA Validator Manager
+   contract initialized; "✓ Fuji successfully tracking thewindowl1".
+   - Chain: **chainId 0xa86d (43117)**, Blockchain ID
+     `2kzh1mkKsEh77nekTA1aWkpwCFyg1NNsYWEVr2fhRpTXPHCjfL`, RPC served by the local node
+     at `http://127.0.0.1:9652/ext/bc/<blockchainID>/rpc`.
+4. **Stack**: the SAME `DeployAll` via `RPC_L1=<fuji-l1-rpc> bash demo/run_l1.sh`
+   (run_l1.sh is reused unchanged — it already asserts 0xa86d and reads `RPC_L1`).
+   Deterministic addresses ⇒ `deployments/43117.json` unchanged. Genesis verified
+   on-chain: admin TxAllowList role = Admin (2), intruder prefunded 1M WIN.
+
+**Verified on the Fuji-L1** (all PASS): `verify_l1_allowlist` (non-member tx rejected at
+chain level, member tx mined), `verify_l1_readgate` (member 200 / anon 403 / intruder
+403), `verify_l1_revoke` (network+market+eERC+observation ✗, then restore), and
+**M-ONIA printing** — `lastPrintedEpoch = 3`, three `RatePrinted` events, each via
+`postPrint` which verifies the 4-chunk Groth16 PoCD on-chain. Same encrypted-auction
+lifecycle as the local L1, now on a chain non-members can neither transact on nor observe.
+
+**Gotchas (Fuji-anchored, hit live):**
+- **Port conflict**: `node local start` grabs 9650+, colliding with a running
+  `blockchain deploy --local` network. Run `avalanche network stop` first to free the
+  ports (reversible via `network start`).
+- **Stale services**: indexer/control started manually against the *old* local RPC keep
+  holding :8788/:8900, so `run_l1.sh`'s fresh services can't bind and die silently — the
+  read-gate then 403s valid members (their `isMember` read hits the dead RPC). Kill any
+  stray `node {indexer,control}/index.mjs` before/after cutover.
+- **`--balance` is real P-Chain AVAX** — the single biggest cost; 0.3 gives a modest
+  validator fee runway (fine for a demo).
+
 ## Honest scope
 
-This is a **local** L1 (single avalanchego node via avalanche-cli) — the sovereign-
-testnet variant (real validators tracking the L1 on Fuji) is the same genesis +
-`avalanche blockchain deploy thewindowl1 --fuji` plus node infra, deliberately not
-run for the hackathon (fragile to keep alive through judging). Everything else —
-precompile behavior, the membership→allowlist wiring, the full private-auction
-lifecycle with real proofs — is identical to what a testnet L1 would run.
+**Single local-machine bootstrap validator** ⇒ the Fuji-L1 lives only while this
+machine's node stays up and tracking (same posture as the local demo, now Fuji-anchored,
+not production-HA). A multi-validator / always-on deployment would use
+`avalanche node create` (cloud) with the same genesis + deploy. Everything else —
+precompile behavior, the membership→allowlist wiring, the read-gate, the full
+private-auction lifecycle with real PoCD — is identical and now proven on Fuji.
