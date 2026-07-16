@@ -4,6 +4,7 @@ import { AlertTriangle, RefreshCw, Loader2, Home } from 'lucide-react';
 import Layout from './components/Layout';
 import { RoleGate } from './components/RoleGate';
 import { ToastProvider } from './contexts/ToastContext';
+import { IS_L1 } from './config';
 
 // Route-level code splitting.
 const MarketHome = lazy(() => import('./pages/MarketHome'));
@@ -89,7 +90,8 @@ export default function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<MarketHome />} />
               <Route path="explorer" element={<Explorer />} />
-              <Route path="l1" element={<L1 />} />
+              {/* L1 story panel — only on the permissioned L1 deployment (43117) */}
+              {IS_L1 && <Route path="l1" element={<L1 />} />}
               <Route path="methodology" element={<Methodology />} />
               <Route path="diagnostics" element={<Diagnostics />} />
               <Route path="app" element={<RoleGate need="member"><Console /></RoleGate>} />
