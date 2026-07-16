@@ -6,11 +6,14 @@ import ConnectWallet from './ConnectWallet';
 import ProfileSwitch from './ProfileSwitch';
 import HeaderTicker from './HeaderTicker';
 import { useSessionStore } from '../stores/useSessionStore';
+import { IS_L1 } from '../config';
 
 const baseNav = [
   { path: '/', label: 'Market', icon: LineChart },
   { path: '/explorer', label: 'Explorer', icon: Binary },
-  { path: '/l1', label: 'L1', icon: Network },
+  // The L1 story panel only exists on the permissioned L1 deployment (VITE_CHAIN_ID=43117);
+  // hidden on Fuji/local so the hosted app never shows a dead tab.
+  ...(IS_L1 ? [{ path: '/l1', label: 'L1', icon: Network }] : []),
   { path: '/app', label: 'Console', icon: LayoutDashboard },
   { path: '/methodology', label: 'Methodology', icon: BookText },
   { path: '/diagnostics', label: 'Diagnostics', icon: Activity },
