@@ -39,6 +39,7 @@ export default function Methodology() {
         </p>
       </div>
 
+      <section id="auction" className="scroll-mt-24">
       <Card>
         <CardHeader title={<span className="flex items-center gap-2"><Gavel className="w-4 h-4 text-benchmark-400" /> Uniform-price auction</span>} />
         <div className="text-sm text-gray-400 space-y-2 leading-relaxed">
@@ -55,7 +56,9 @@ export default function Methodology() {
           </p>
         </div>
       </Card>
+      </section>
 
+      <section id="pocd" className="scroll-mt-24">
       <Card>
         <CardHeader title={<span className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-signal-up" /> Proof of correct decryption (PoCD)</span>} />
         <p className="text-sm text-gray-400 leading-relaxed">
@@ -65,6 +68,7 @@ export default function Methodology() {
           administrator’s arithmetic, you verify it.
         </p>
       </Card>
+      </section>
 
       <div className="grid sm:grid-cols-2 gap-4">
         <Card>

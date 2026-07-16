@@ -7,6 +7,7 @@ import { EncryptedValue } from '../components/ui/EncryptedValue';
 import { RevealButton } from '../components/ui/RevealButton';
 import { Countdown } from '../components/ui/Countdown';
 import { StatusPill } from '../components/ui/StatusPill';
+import { Term } from '../components/ui/Term';
 import { usePositionsStore } from '../stores/usePositionsStore';
 import { useMarketStore } from '../stores/useMarketStore';
 import { useSessionStore } from '../stores/useSessionStore';
@@ -67,7 +68,7 @@ export default function Console() {
         <StatTile label="TestUSDC" value={balances ? formatUsdc(balances.usdcErc20) : '—'} icon={Wallet} sub="public" />
         <div className="glass px-4 py-3">
           <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-gray-500 mb-1.5">
-            <span className="flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> Encrypted eERC</span>
+            <span className="flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> Encrypted <Term k="eerc" /></span>
             {revealed === null && <RevealButton onReveal={doReveal} />}
           </div>
           <div className="text-xl font-bold num text-cipher-300">

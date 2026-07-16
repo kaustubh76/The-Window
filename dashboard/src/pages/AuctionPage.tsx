@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Lock, Send } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Lock, Send, Inbox } from 'lucide-react';
 import clsx from 'clsx';
 import { Card, CardHeader } from '../components/ui/Card';
 import { RateTickPicker } from '../components/ui/RateTickPicker';
@@ -8,6 +9,8 @@ import { Countdown } from '../components/ui/Countdown';
 import { StatusPill } from '../components/ui/StatusPill';
 import { ProofState } from '../components/ui/ProofState';
 import { EncryptedValue } from '../components/ui/EncryptedValue';
+import { EmptyState } from '../components/ui/EmptyState';
+import { Term } from '../components/ui/Term';
 import { useMarketStore } from '../stores/useMarketStore';
 import { usePositionsStore } from '../stores/usePositionsStore';
 import { useClock } from '../hooks/useClock';
@@ -37,6 +40,22 @@ export default function AuctionPage() {
   const [size, setSize] = useState('');
   const [pulse, setPulse] = useState(false);
   useEffect(() => setSide(defaultSide), [defaultSide]);
+
+  // Deep-link from the market hero ("click a rate to trade there"): seed the rate (and side,
+  // if given) from the URL once on mount, then drop the params so later edits aren't fought.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const rate = searchParams.get('rate');
+    const sideParam = searchParams.get('side');
+    if (!rate && !sideParam) return;
+    if (rate) {
+      const t = bpsToTick(Number(rate));
+      if (Number.isFinite(t)) setTick(t);
+    }
+    if (sideParam === 'ask' || sideParam === 'bid') setSide(sideParam);
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const rStarTick = latestMonia?.rStarBps != null ? bpsToTick(latestMonia.rStarBps) : null;
   const shownDepth = depth.some((d) => d.supply > 0n || d.demand > 0n) ? depth : latestMonia?.depth ?? [];
@@ -115,6 +134,9 @@ export default function AuctionPage() {
           <div className="mb-5">
             <div className="text-xs text-gray-500 mb-2">{side === 'ask' ? 'Minimum acceptable rate' : 'Maximum acceptable rate'} · public</div>
             <RateTickPicker value={tick} onChange={setTick} rStarTick={rStarTick} side={side} />
+            <p className="text-[11px] text-gray-600 mt-2">
+              Pick a public rate <Term k="tick" />; matched orders all settle at the clearing rate <Term k="rstar" />.
+            </p>
           </div>
 
           <div className="mb-4">
@@ -158,7 +180,11 @@ export default function AuctionPage() {
         <Card>
           <CardHeader title="My open bids this epoch" />
           {myBids.length === 0 ? (
-            <p className="text-sm text-gray-600">No bids yet.</p>
+            <EmptyState
+              icon={Inbox}
+              title="No orders yet this epoch"
+              body="Set a rate on the left and submit — your size is encrypted before it leaves your browser."
+            />
           ) : (
             <div className="space-y-2">
               {myBids.slice(0, 6).map((b) => (
