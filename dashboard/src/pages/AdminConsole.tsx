@@ -10,7 +10,7 @@ import { useAdapterStore } from '../stores/useAdapterStore';
 import { useTx } from '../hooks/useTx';
 import { useToast } from '../contexts/ToastContext';
 import { bpsToPctLabel } from '../lib/rates';
-import { formatUsdcCompact } from '../lib/usdc';
+import { formatUsdcCompact, formatVolume } from '../lib/usdc';
 import type { DepthPoint, MoniaPrint } from '../lib/adapter/types';
 
 export default function AdminConsole() {
@@ -130,7 +130,7 @@ export default function AdminConsole() {
           <div className="flex items-center gap-3">
             <span className="rate-print text-xl">{print.rStarBps != null ? bpsToPctLabel(print.rStarBps) : 'no-trade'}</span>
             <PoCDBadge pocd={print.pocd} />
-            <span className="text-xs text-gray-500 num">vol {formatUsdcCompact(print.aggVolume)}</span>
+            <span className="text-xs text-gray-500 num">vol {formatVolume(print)}</span>
           </div>
         )}
       </Step>

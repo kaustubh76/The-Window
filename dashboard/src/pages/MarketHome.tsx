@@ -15,7 +15,7 @@ import { PoCDBadge } from '../components/ui/PoCDBadge';
 import { HonestClaimsCallout } from '../components/ui/HonestClaimsCallout';
 import { LiveTxFeed } from '../components/ui/LiveTxFeed';
 import { MarketHeroSkeleton } from '../components/ui/Skeleton';
-import { formatUsdcCompact } from '../lib/usdc';
+import { formatVolume } from '../lib/usdc';
 import { bpsToPctLabel, tickToBps } from '../lib/rates';
 import { TAGLINE } from '../config';
 import { paletteHint } from '../components/CommandPalette';
@@ -157,7 +157,7 @@ export default function MarketHome() {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <StatTile label="Clearing rate" value={latestMonia?.rStarBps != null ? bpsToPctLabel(latestMonia.rStarBps) : '—'} accent="gold" icon={Activity} />
-            <StatTile label="Epoch volume" value={latestMonia ? formatUsdcCompact(latestMonia.aggVolume) : '—'} icon={Layers} sub="USDC" />
+            <StatTile label="Epoch volume" value={latestMonia ? formatVolume(latestMonia) : '—'} icon={Layers} sub="USDC" />
             <StatTile label="Active loans" value={active} accent="cipher" icon={Landmark} sub={`${repaid} repaid · ${defaulted} seized`} />
             <StatTile label="Members" value={members.length} icon={Users} sub="all simulated" />
           </div>
@@ -180,7 +180,7 @@ export default function MarketHome() {
                   <span className="num text-benchmark-400 font-semibold">
                     {p.rStarBps != null ? bpsToPctLabel(p.rStarBps) : 'no-trade'}
                   </span>
-                  <span className="num text-xs text-gray-600">{formatUsdcCompact(p.aggVolume)}</span>
+                  <span className="num text-xs text-gray-600">{formatVolume(p)}</span>
                 </div>
               ))}
             </div>
