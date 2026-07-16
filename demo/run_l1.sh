@@ -32,6 +32,7 @@ if [ -f /tmp/window_l1_pids ]; then xargs kill < /tmp/window_l1_pids 2>/dev/null
 export RPC_LOCAL="$RPC_L1" CHAIN_ID=43117 PROFILE=DEMO
 export EPOCH_LEN="${EPOCH_LEN:-60}" TENOR_BLOCKS="${TENOR_BLOCKS:-20}" KEEPER_STALL_S=120 BLOCK_SEC=2
 export INDEXER_PORT=8788 CONTROL_PORT=8900
+export READ_GATE=1   # L1 read surface is member-gated (only members can OBSERVE the market)
 export ADMIN_PK=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 export KEEPER_PK=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
 export VAULT_OPERATOR_PK=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
@@ -86,7 +87,17 @@ nohup node indexer/index.mjs > /tmp/window_l1_indexer.log 2>&1 & echo $! >> /tmp
 nohup node control/index.mjs > /tmp/window_l1_control.log 2>&1 & echo $! >> /tmp/window_l1_pids
 
 sleep 8
-echo "== proof: membership == chain access =="
+echo "== proof: membership == chain access (write-gate) =="
 RPC_L1="$RPC_L1" node "$ROOT/demo/verify_l1_allowlist.mjs" || true
 echo
-echo "L1 stack running. logs: /tmp/window_l1_*.log · indexer http://127.0.0.1:8788 · stop: xargs kill < /tmp/window_l1_pids"
+echo "== proof: membership == observation (read-gate) =="
+READGATE_URL="http://127.0.0.1:8788" node "$ROOT/demo/verify_l1_readgate.mjs" || true
+echo
+echo "== proof: atomic revocation (market + eERC + network + observation) =="
+RPC_L1="$RPC_L1" READGATE_URL="http://127.0.0.1:8788" node "$ROOT/demo/verify_l1_revoke.mjs" || true
+echo
+echo "== what a competitor sees: public Fuji vs the L1 =="
+READGATE_URL="http://127.0.0.1:8788" node "$ROOT/demo/what_a_competitor_sees.mjs" || true
+echo
+echo "L1 stack running. logs: /tmp/window_l1_*.log · indexer http://127.0.0.1:8788 (READ_GATE on) · stop: xargs kill < /tmp/window_l1_pids"
+echo "Dashboard on the L1 (member-gated reads + /l1 story page):  cd dashboard && npm run dev -- --mode l1"

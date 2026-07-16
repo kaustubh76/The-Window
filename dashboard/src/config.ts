@@ -49,11 +49,29 @@ export function minBidMicro(p: Profile = PROFILE): bigint {
 export const CHAIN_ID = Number(env.VITE_CHAIN_ID ?? 43113);
 export const RPC_FUJI = env.VITE_RPC_FUJI ?? 'https://api.avax-test.network/ext/bc/C/rpc';
 export const RPC_LOCAL = env.VITE_RPC_LOCAL ?? 'http://127.0.0.1:8545';
+
+// ---- permissioned-L1 awareness (thewindowl1, 43117) ----
+// On the sovereign L1, membership IS chain access: non-members can neither transact
+// (TxAllowList write-gate) nor observe (READ_GATE read-gate). READ_GATED turns on the
+// member-signature auth for indexer reads (see services/readAuth.ts); off on Fuji, so
+// the public hard-mode deployment is unchanged.
+export const IS_L1 = CHAIN_ID === 43117;
+export const READ_GATED = env.VITE_READ_GATE === '1' || IS_L1;
+export const HAS_PUBLIC_EXPLORER = !IS_L1;
+export const CHAIN_LABEL = IS_L1
+  ? 'thewindowl1 · 43117 · Subnet-EVM'
+  : CHAIN_ID === 43113
+    ? `Fuji · ${CHAIN_ID}`
+    : `chain ${CHAIN_ID}`;
+
 export const INDEXER_URL = env.VITE_INDEXER_URL ?? '/api';
 // Control API — the backend that performs member/admin/keeper WRITES server-side
 // (proven eerc-node flows) for the disclosed simulated members. See services/control.
 export const CONTROL_URL = env.VITE_CONTROL_URL ?? 'http://127.0.0.1:8899';
 export const SNOWTRACE_URL = env.VITE_SNOWTRACE_URL ?? 'https://testnet.snowtrace.io';
+// The live hosted Fuji indexer — read by the /l1 competitor pane to show the REAL
+// participation leak on a public chain (both indexers send permissive CORS).
+export const FUJI_INDEXER_URL = env.VITE_FUJI_INDEXER_URL ?? 'https://window-indexer.onrender.com';
 
 // ---- deployed addresses (live mode) ----
 export const ADDRESSES = {

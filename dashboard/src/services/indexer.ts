@@ -2,7 +2,8 @@
 // fetchWithRetry + TTL-cache pattern. Used by the LiveAdapter for M-ONIA history, depth,
 // and loan lifecycle (events the chain doesn't expose cheaply). No-ops gracefully until
 // the indexer is running.
-import { INDEXER_URL } from '../config';
+import { INDEXER_URL, READ_GATED } from '../config';
+import { getReadHeaders } from './readAuth';
 
 interface CacheEntry {
   at: number;
@@ -14,12 +15,15 @@ const MAX_ENTRIES = 200;
 
 export async function fetchWithRetry(path: string, opts: { retries?: number; timeoutMs?: number } = {}): Promise<Response> {
   const { retries = 2, timeoutMs = 8_000 } = opts;
+  // On the read-gated L1, attach the member-signature headers (empty on Fuji / for a
+  // non-member — the indexer then 403s and the UI shows the gated state).
+  const headers = await getReadHeaders();
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const res = await fetch(`${INDEXER_URL}${path}`, { signal: ctrl.signal });
+      const res = await fetch(`${INDEXER_URL}${path}`, { signal: ctrl.signal, headers });
       clearTimeout(t);
       if (res.status === 429) {
         await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
@@ -35,14 +39,17 @@ export async function fetchWithRetry(path: string, opts: { retries?: number; tim
 }
 
 export async function getJson<T>(path: string, useCache = true): Promise<T> {
-  if (useCache) {
+  // Never cache gated reads: the response depends on the current actor's token, so a
+  // cached member response must not leak across an actor/outsider switch.
+  const cacheable = useCache && !READ_GATED;
+  if (cacheable) {
     const hit = cache.get(path);
     if (hit && Date.now() - hit.at < TTL_MS) return hit.value as T;
   }
   const res = await fetchWithRetry(path);
   if (!res.ok) throw new Error(`indexer ${path} → ${res.status}`);
   const value = (await res.json()) as T;
-  if (useCache) {
+  if (cacheable) {
     if (cache.size >= MAX_ENTRIES) cache.clear();
     cache.set(path, { at: Date.now(), value });
   }

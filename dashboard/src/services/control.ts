@@ -27,6 +27,81 @@ export async function controlActors(): Promise<ControlActor[]> {
   return Array.isArray(list) ? list.map((a) => ({ ...a, address: a.address.toLowerCase() as Address })) : [];
 }
 
+// ---- permissioned-L1 surface ----
+export interface AllowlistRow {
+  address: Address;
+  label: string;
+  role: number; // 0 None · 1 Enabled · 2 Admin (TxAllowList precompile)
+  roleName: string;
+  isMember: boolean;
+}
+
+/** Live TxAllowList roles for the member set + intruder (Control reads the precompile). */
+export async function l1Allowlist(): Promise<{ precompile: string; rows: AllowlistRow[] }> {
+  const j = await req('/l1/allowlist', undefined, 'GET');
+  const rows: AllowlistRow[] = Array.isArray(j.rows)
+    ? j.rows.map((r: AllowlistRow) => ({ ...r, address: String(r.address).toLowerCase() as Address }))
+    : [];
+  return { precompile: String(j.precompile ?? ''), rows };
+}
+
+export interface RevokeStep {
+  key: string;
+  label: string;
+  ok: boolean;
+}
+export interface RevokeDemoResult {
+  ok: boolean;
+  subject?: { name: string; address: string };
+  steps?: RevokeStep[];
+  restored?: boolean;
+  error?: string;
+}
+
+/** Run the live atomic revocation on the L1 (removeMember → 4 layers ✗ → restore). */
+export async function runRevokeDemo(address?: string): Promise<RevokeDemoResult> {
+  try {
+    return (await req('/l1/revoke-demo', { address }, 'POST')) as RevokeDemoResult;
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'revoke-demo failed' };
+  }
+}
+
+export interface L1Info {
+  ok: boolean;
+  chainId?: number;
+  block?: number;
+  networkID?: number | null;
+  anchor?: 'fuji' | 'mainnet' | 'local';
+  nodeID?: string | null;
+  blockchainId?: string | null;
+}
+
+/** Live chain identity — proves Fuji-anchoring (networkID 5) vs a local network. */
+export async function l1Info(): Promise<L1Info> {
+  try {
+    return (await req('/l1/info', undefined, 'GET')) as L1Info;
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** Mint a member-signed read token (null when the address is not a member → 403). */
+export async function mintReadToken(address: string): Promise<{ address: string; sig: string } | null> {
+  try {
+    const res = await fetch(`${CONTROL_URL}/member/read-token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address }),
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return j?.ok && j.sig ? { address: String(j.address), sig: String(j.sig) } : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function controlHealth(): Promise<boolean> {
   try {
     const j = await req('/health', undefined, 'GET');
