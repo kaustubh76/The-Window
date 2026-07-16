@@ -1,0 +1,34 @@
+# Dashboard CI — enforces what the README promises: the honest-claims guardrail and the
+# type/unit suite actually run on every change to the frontend. Without this job the
+# guardrail (dashboard/src/lib/honestClaims.test.ts) was documented as "CI-enforced" but
+# nothing ran it.
+name: dashboard-ci
+on:
+  push:
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard-ci.yml"
+  pull_request:
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard-ci.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: install
+        run: npm ci
+      - name: typecheck
+        run: node_modules/.bin/tsc --noEmit
+      - name: test (unit + honest-claims guardrail)
+        run: node_modules/.bin/vitest run

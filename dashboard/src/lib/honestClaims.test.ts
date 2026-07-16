@@ -38,4 +38,17 @@ describe('honest-claims guardrail (CI)', () => {
     expect(claims).toMatch(/accountable/i);
     expect(claims).toMatch(/can decrypt individual amounts/i);
   });
+
+  // Class-of-bug guard: the default deployment is MOCK, so any component that asserts
+  // real on-chain activity ("Real Fuji transactions", a pulsing live badge) must gate that
+  // copy on ADAPTER_MODE — otherwise a mock build makes a live claim it can't back.
+  it('live-only "Real Fuji" copy is gated on ADAPTER_MODE', () => {
+    const LIVE_ONLY = /Real Fuji transactions/;
+    for (const f of files) {
+      const src = fs.readFileSync(f, 'utf8');
+      if (LIVE_ONLY.test(src)) {
+        expect(src, `${path.relative(SRC, f)} makes a live claim without gating on ADAPTER_MODE`).toMatch(/ADAPTER_MODE/);
+      }
+    }
+  });
 });
