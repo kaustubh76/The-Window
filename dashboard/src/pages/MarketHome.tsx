@@ -1,9 +1,10 @@
-import { Link } from 'react-router-dom';
-import { Activity, Layers, Users, Landmark, ArrowRight, Binary } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Activity, Layers, Users, Landmark, ArrowRight, Binary, FlaskConical, MousePointerClick } from 'lucide-react';
 import { useMarketStore } from '../stores/useMarketStore';
 import { useSessionStore } from '../stores/useSessionStore';
 import { JourneyStepper } from '../components/journey/JourneyStepper';
 import { useClock } from '../hooks/useClock';
+import { useToast } from '../contexts/ToastContext';
 import { Card, CardHeader } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { MoniaTicker } from '../components/ui/MoniaTicker';
@@ -15,13 +16,31 @@ import { HonestClaimsCallout } from '../components/ui/HonestClaimsCallout';
 import { LiveTxFeed } from '../components/ui/LiveTxFeed';
 import { MarketHeroSkeleton } from '../components/ui/Skeleton';
 import { formatUsdcCompact } from '../lib/usdc';
-import { bpsToPctLabel } from '../lib/rates';
+import { bpsToPctLabel, tickToBps } from '../lib/rates';
 import { TAGLINE } from '../config';
+import { paletteHint } from '../components/CommandPalette';
+import type { TickIndex } from '../lib/adapter/types';
+
+const openPersonaPicker = () => window.dispatchEvent(new Event('personapicker:open'));
 
 export default function MarketHome() {
   const clock = useClock();
+  const navigate = useNavigate();
+  const toast = useToast();
   const { latestMonia, history, depth, members, loanBook } = useMarketStore();
   const connected = useSessionStore((s) => !!s.address);
+
+  // Clicking a rate on the public hero chart is an invitation to trade there: connected users
+  // deep-link into the auction with that tick preselected; disconnected users are nudged to
+  // pick a persona first (so the chart stops being a passive read-out).
+  const onHeroPickRate = (t: TickIndex) => {
+    const bps = tickToBps(t);
+    if (connected) navigate(`/app/auction?rate=${bps}`);
+    else {
+      toast.info(`Pick a persona to place an order at ${bpsToPctLabel(bps)}`);
+      openPersonaPicker();
+    }
+  };
 
   const active = loanBook.filter((l) => l.status === 'Active').length;
   const repaid = loanBook.filter((l) => l.status === 'Repaid').length;
@@ -52,6 +71,30 @@ export default function MarketHome() {
         </Link>
       </p>
 
+      {/* Start here — the disconnected first-timer's guided entry (interactive pieces live
+          behind the connect gate, so surface the one-click way in right on the landing). */}
+      {!connected && (
+        <Card className="!p-5 border-benchmark-500/20 bg-benchmark-500/[0.03] animate-fade-in-up">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="w-11 h-11 rounded-xl bg-benchmark-500/15 text-benchmark-300 flex items-center justify-center flex-shrink-0">
+              <FlaskConical className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base font-semibold text-white">Start trading in one click</h2>
+              <p className="text-sm text-gray-400 mt-0.5">
+                Play as a simulated lender or borrower — no wallet, no keys needed. We’ll walk you through it.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button onClick={openPersonaPicker} className="btn btn-primary inline-flex items-center gap-2">
+                Choose who to play as <ArrowRight className="w-4 h-4" />
+              </button>
+              <span className="hidden lg:inline text-[11px] text-gray-600 num">or {paletteHint}</span>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Hero */}
       <Card shine className="!p-7">
         <div className="grid lg:grid-cols-[1.6fr_1fr] gap-6 items-center">
@@ -74,9 +117,15 @@ export default function MarketHome() {
               </div>
             )}
             <p className="text-sm text-gray-500 italic pt-2 border-t border-white/[0.06]">“{TAGLINE}”</p>
-            <Link to="/app" className="btn btn-primary w-full flex items-center justify-center gap-2 mt-1">
-              {connected ? 'Go to your desk' : 'Enter the market'} <ArrowRight className="w-4 h-4" />
-            </Link>
+            {connected ? (
+              <Link to="/app" className="btn btn-primary w-full flex items-center justify-center gap-2 mt-1">
+                Go to your desk <ArrowRight className="w-4 h-4" />
+              </Link>
+            ) : (
+              <button onClick={openPersonaPicker} className="btn btn-primary w-full flex items-center justify-center gap-2 mt-1">
+                <FlaskConical className="w-4 h-4" /> Choose who to play as
+              </button>
+            )}
             <Link to="/explorer" className="btn btn-outline w-full flex items-center justify-center gap-2">
               <Binary className="w-4 h-4" /> Open Explorer
             </Link>
@@ -93,9 +142,16 @@ export default function MarketHome() {
           <CardHeader
             title="Aggregate depth curve"
             subtitle="Cumulative supply vs demand — the only size data shown publicly"
-            right={latestMonia && <PoCDBadge pocd={latestMonia.pocd} compact />}
+            right={
+              <div className="flex items-center gap-2">
+                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-gray-600">
+                  <MousePointerClick className="w-3 h-3" /> click a rate to trade there
+                </span>
+                {latestMonia && <PoCDBadge pocd={latestMonia.pocd} compact />}
+              </div>
+            }
           />
-          <DepthChart depth={shownDepth} />
+          <DepthChart depth={shownDepth} onPickRate={onHeroPickRate} />
         </Card>
 
         <div className="space-y-4">
@@ -108,7 +164,16 @@ export default function MarketHome() {
           <Card>
             <CardHeader title="Recent prints" />
             <div className="space-y-1.5 max-h-[168px] overflow-y-auto">
-              {history.length === 0 && <p className="text-sm text-gray-600">Waiting for the first print…</p>}
+              {history.length === 0 && (
+                <div className="flex items-center justify-between text-sm py-1">
+                  <span className="text-gray-500">First print lands when the epoch closes</span>
+                  {clock?.status === 'Open' ? (
+                    <Countdown targetMs={clock.closesAt} label="in" className="text-xs" />
+                  ) : (
+                    <span className="text-signal-stale text-xs">printing…</span>
+                  )}
+                </div>
+              )}
               {[...history].reverse().slice(0, 8).map((p) => (
                 <div key={p.epoch} className="flex items-center justify-between text-sm py-1 border-b border-white/[0.03] last:border-0">
                   <span className="num text-gray-500">epoch {p.epoch}</span>

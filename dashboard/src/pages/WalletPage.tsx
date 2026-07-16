@@ -7,6 +7,7 @@ import { RevealButton } from '../components/ui/RevealButton';
 import { AmountInput } from '../components/ui/AmountInput';
 import { ProofState } from '../components/ui/ProofState';
 import { HonestClaimsCallout } from '../components/ui/HonestClaimsCallout';
+import { Term } from '../components/ui/Term';
 import { usePositionsStore } from '../stores/usePositionsStore';
 import { useSessionStore } from '../stores/useSessionStore';
 import { useAdapterStore } from '../stores/useAdapterStore';
@@ -103,7 +104,7 @@ export default function WalletPage() {
       <Card>
         <CardHeader
           title={<span className="flex items-center gap-2"><KeyRound className="w-4 h-4 text-benchmark-400" /> Encryption key</span>}
-          subtitle="Register once to derive your BabyJubJub key — required before wrapping or bidding"
+          subtitle={<>Register once to derive your <Term k="bjj">BabyJubJub key</Term> — required before wrapping or bidding</>}
           right={registered ? <span className="pocd-badge num">registered</span> : null}
         />
         {registered ? (
@@ -119,7 +120,7 @@ export default function WalletPage() {
 
       {/* Step 2 — faucet + wrap */}
       <Card>
-        <CardHeader title={<span className="flex items-center gap-2"><Droplet className="w-4 h-4 text-cipher-300" /> Fund & wrap</span>} subtitle="Get TestUSDC, then wrap it into your encrypted balance" />
+        <CardHeader title={<span className="flex items-center gap-2"><Droplet className="w-4 h-4 text-cipher-300" /> Fund & wrap</span>} subtitle={<>Get TestUSDC, then <Term k="wrap">wrap</Term> it into your encrypted balance</>} />
         <div className="flex items-center gap-2 mb-4">
           <button onClick={doFaucet} disabled={funding} className="btn btn-secondary flex items-center gap-2">
             {funding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Droplet className="w-4 h-4" />} Faucet +1,000
