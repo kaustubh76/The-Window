@@ -124,7 +124,8 @@ export default function MarketHome() {
         </div>
       </div>
 
-      {/* Live on-chain transaction feed — real Fuji txs with Snowtrace links */}
+      {/* On-chain activity feed — real Fuji txs + Snowtrace links when live; honestly
+          framed as simulated in the default mock build (LiveTxFeed gates on ADAPTER_MODE) */}
       <LiveTxFeed />
 
       <div className="flex justify-center">

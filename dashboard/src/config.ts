@@ -91,3 +91,19 @@ export const KEEPER_ADDR = (env.VITE_KEEPER_ADDR ?? '').toLowerCase();
 
 // tagline — the one line that must appear on the demo closer
 export const TAGLINE = 'The rate is public. The borrowing never was.';
+
+// ---- boot-time config sanity ----
+// Catch the one sharp edge a hosted LIVE build can hit: if VITE_CONTROL_URL is unset, the
+// live adapter silently posts every member/keeper/admin write to localhost and fails with
+// no user-visible cause. Surface it loudly instead of failing in silence.
+function computeConfigWarnings(): string[] {
+  const w: string[] = [];
+  if (ADAPTER_MODE === 'live' && /localhost|127\.0\.0\.1/.test(CONTROL_URL)) {
+    w.push(
+      `Live mode but Control API points at ${CONTROL_URL} — set VITE_CONTROL_URL to the hosted Control API or every write will fail.`,
+    );
+  }
+  return w;
+}
+export const CONFIG_WARNINGS: string[] = computeConfigWarnings();
+if (CONFIG_WARNINGS.length) console.error('[config]', CONFIG_WARNINGS.join(' '));

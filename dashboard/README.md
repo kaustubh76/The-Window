@@ -21,7 +21,7 @@ that drives a full scripted market with **zero backend**. It's fully demoable ou
 
 ```bash
 npm run build        # tsc + vite build
-npm run test         # vitest (27 tests: money/rate math, eERC crypto, engine determinism, honest-claims lint)
+npm run test         # vitest (31 tests: money/rate math, eERC crypto, engine determinism, honest-claims lint)
 npm run typecheck
 ```
 
@@ -69,9 +69,11 @@ M-ONIA rate + depth curve on the right, with the tagline in the seam.
 
 The Benchmark Administrator holds the auditor key and **can** decrypt individual amounts — the
 documented, SOFR-style trust model. The UI states this proudly and **never** claims "trustless",
-"undecryptable", or "nobody can see the bids". This is enforced in CI by
-`src/lib/honestClaims.test.ts`, which greps every source file for forbidden phrases and asserts each
-M-ONIA print renders a PoCD badge.
+"undecryptable", or "nobody can see the bids". This is enforced in CI (the
+`dashboard-ci` workflow runs `tsc` + `vitest` on every change) by
+`src/lib/honestClaims.test.ts`, which greps every source file for forbidden phrases, asserts each
+M-ONIA print renders a PoCD badge, and requires any "Real Fuji" copy to be gated on the
+adapter mode so a mock build can't claim live on-chain activity.
 
 ## Stack
 
