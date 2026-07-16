@@ -36,6 +36,12 @@ export function formatUsdc(micro: UsdcMicro, opts: { decimals?: number; group?: 
   return decimals > 0 ? `${groupedWhole}.${fixedFrac}` : groupedWhole;
 }
 
+/** Epoch-volume label: em dash for a no-trade / stale print (no volume actually cleared),
+ *  else compact USDC. Keeps "no trade" from reading as a misleading "$0". */
+export function formatVolume(v: { aggVolume: UsdcMicro; stale?: boolean }): string {
+  return v.stale || toMicro(v.aggVolume) === 0n ? '—' : formatUsdcCompact(v.aggVolume);
+}
+
 /** Compact form for charts/tickers: 1_500_000000n -> "1.5M". */
 export function formatUsdcCompact(micro: UsdcMicro): string {
   const n = microToNumber(micro);

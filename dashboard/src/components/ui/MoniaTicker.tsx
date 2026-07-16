@@ -1,7 +1,7 @@
 import { TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react';
 import clsx from 'clsx';
 import type { MoniaPrint } from '../../lib/adapter/types';
-import { formatUsdcCompact } from '../../lib/usdc';
+import { formatVolume } from '../../lib/usdc';
 import { useAnimatedNumber } from '../../hooks/useAnimatedNumber';
 import { PoCDBadge } from './PoCDBadge';
 import { MoniaSparkline } from './MoniaSparkline';
@@ -53,7 +53,7 @@ export function MoniaTicker({ latest, history }: { latest: MoniaPrint | null; hi
             )}
             {latest && (
               <span className="text-xs text-gray-500 num">
-                vol {formatUsdcCompact(latest.aggVolume)} · epoch {latest.epoch}
+                vol {formatVolume(latest)} · epoch {latest.epoch}
               </span>
             )}
           </div>

@@ -24,16 +24,26 @@ function bi(v: unknown): bigint {
     return 0n;
   }
 }
+
+// UNIT BOUNDARY. The auction world (bid size → per-tick askSum/bidSum depth → aggVolume) is
+// carried on-chain as bare BabyJubJub scalars that must stay small so the auditor can
+// BSGS-decrypt the summed depth — i.e. WHOLE-USDC integers (1 = 1 USDC). The frontend money
+// layer is micro-USDC. Translate at this boundary: ×1e6 on the way in, ÷1e6 on the way out.
+// (The eERC token world — usdcErc20 / eercClear — is a real 6-dp ERC-20 and is NOT scaled.)
+export const EERC_UNIT_MICRO = 1_000_000n;
+export const eercToMicro = (v: unknown): bigint => bi(v) * EERC_UNIT_MICRO;
+export const microToEercUnit = (micro: bigint): string => (micro / EERC_UNIT_MICRO).toString();
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
-function mapDepth(d: any): DepthPoint[] {
-  return Array.isArray(d) ? d.map((p) => ({ tick: p.tick, bps: p.bps, supply: bi(p.supply), demand: bi(p.demand) })) : [];
+export function mapDepth(d: any): DepthPoint[] {
+  return Array.isArray(d) ? d.map((p) => ({ tick: p.tick, bps: p.bps, supply: eercToMicro(p.supply), demand: eercToMicro(p.demand) })) : [];
 }
-function mapPrint(p: any): MoniaPrint | null {
+export function mapPrint(p: any): MoniaPrint | null {
   if (!p) return null;
   return {
     epoch: p.epoch,
     rStarBps: p.rStarBps ?? null,
-    aggVolume: bi(p.aggVolume),
+    aggVolume: eercToMicro(p.aggVolume),
     depth: mapDepth(p.depth),
     pocd: p.pocd ?? { verified: false },
     printedAt: p.printedAt ?? 0,
@@ -146,8 +156,10 @@ export class LiveAdapter implements WindowAdapter {
   faucet(a: Address, amt: UsdcMicro) { return this.tx(undefined, () => ctrl('/member/faucet', { address: a, amount: amt.toString() })); }
   wrap(a: Address, amt: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/wrap', { address: a, amount: amt.toString() })); }
   unwrap(a: Address, amt: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/unwrap', { address: a, amount: amt.toString() })); }
-  submitAsk(a: Address, tick: TickIndex, size: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/bid', { address: a, side: 0, tick, size: size.toString() })); }
-  submitBid(a: Address, tick: TickIndex, size: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/bid', { address: a, side: 1, tick, size: size.toString() })); }
+  // Bid sizes ride the auction scalar world (whole-USDC, BSGS-decryptable) — convert down from
+  // the micro-USDC the UI uses so the on-chain scalar stays in range and matches the depth unit.
+  submitAsk(a: Address, tick: TickIndex, size: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/bid', { address: a, side: 0, tick, size: microToEercUnit(size) })); }
+  submitBid(a: Address, tick: TickIndex, size: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/bid', { address: a, side: 1, tick, size: microToEercUnit(size) })); }
   lockCollateral(id: LoanId, _amt: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/lock', { loanId: Number(id) })); }
   fund(id: LoanId, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/fund', { loanId: Number(id) })); }
   repay(id: LoanId, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/repay', { loanId: Number(id) })); }
@@ -176,7 +188,7 @@ export class LiveAdapter implements WindowAdapter {
     const print: MoniaPrint = {
       epoch: e,
       rStarBps: r.rStarBps ?? null,
-      aggVolume: bi(r.matched),
+      aggVolume: eercToMicro(r.matched),
       depth,
       pocd: { verified: true, proveMs: r.proofMs },
       printedAt: Date.now(),
