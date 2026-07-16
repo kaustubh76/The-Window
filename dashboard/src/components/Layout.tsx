@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import Header from './Header';
 import DemoControlBar from './DemoControlBar';
+import { CommandPalette } from './CommandPalette';
 import { EpochProgress } from './ui/EpochProgress';
 import { ServicesBanner } from './ui/ServicesBanner';
 import { useWalletSync } from '../hooks/useWalletSync';
@@ -50,6 +51,7 @@ export default function Layout() {
           <Outlet />
         </main>
         <DemoControlBar />
+        <CommandPalette />
         <footer className="relative border-t border-white/[0.04] mt-8">
           <div className="divider-glow opacity-30" />
           <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">

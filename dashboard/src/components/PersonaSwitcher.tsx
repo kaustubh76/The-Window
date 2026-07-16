@@ -1,64 +1,25 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, Coins, Banknote, Landmark, Bot, FlaskConical, Loader2 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { ChevronDown, FlaskConical, Loader2 } from 'lucide-react';
 import { useSessionStore } from '../stores/useSessionStore';
 import { useToast } from '../contexts/ToastContext';
-import { SIM_MEMBERS, SIM_ADMIN, SIM_KEEPER } from '../lib/adapter/mock/members';
-import { controlActors, rolesForActor } from '../services/control';
 import { ADAPTER_MODE } from '../config';
-import type { Persona } from '../lib/adapter/types';
+import { MOCK_PERSONA_OPTIONS, loadPersonaOptions, personaLanding, type PersonaOption } from '../lib/personaOptions';
 
-interface Option {
-  label: string;
-  roles: Persona[];
-  address: string;
-  icon: LucideIcon;
-  desc: string;
-}
-
-function iconForRole(roles: Persona[]): LucideIcon {
-  if (roles.includes('admin')) return Landmark;
-  if (roles.includes('keeper')) return Bot;
-  if (roles.includes('lender')) return Coins;
-  return Banknote;
-}
-
-// Mock personas (deterministic simulation)
-const lender = SIM_MEMBERS.find((m) => m.archetype === 'yield-lender')!;
-const borrower = SIM_MEMBERS.find((m) => m.archetype === 'desperate-borrower')!;
-const MOCK_OPTIONS: Option[] = [
-  { label: lender.label, roles: ['lender'], address: lender.address, icon: Coins, desc: 'Lender agent' },
-  { label: borrower.label, roles: ['borrower'], address: borrower.address, icon: Banknote, desc: 'Borrower agent' },
-  { label: 'Administrator', roles: ['admin'], address: SIM_ADMIN.address, icon: Landmark, desc: 'Auditor / benchmark admin' },
-  { label: 'Keeper', roles: ['keeper'], address: SIM_KEEPER.address, icon: Bot, desc: 'Epoch / seize bot' },
-];
-
-// "Act as" a disclosed simulated member. In mock mode these are the DemoEngine personas; in
-// live mode they are the Control API's real actor EOAs (GET /actors) — the connected address
-// MUST be one of these for server-side writes to resolve.
+// "Act as" a disclosed simulated member. Options come from the shared lib/personaOptions
+// (also used by the ⌘K command palette).
 export default function PersonaSwitcher() {
   const connect = useSessionStore((s) => s.connect);
   const navigate = useNavigate();
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const [liveOpts, setLiveOpts] = useState<Option[] | null>(ADAPTER_MODE === 'live' ? null : MOCK_OPTIONS);
+  const [liveOpts, setLiveOpts] = useState<PersonaOption[] | null>(ADAPTER_MODE === 'live' ? null : MOCK_PERSONA_OPTIONS);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (ADAPTER_MODE !== 'live') return;
     let alive = true;
-    controlActors()
-      .then((actors) => {
-        if (!alive) return;
-        setLiveOpts(
-          actors.map((a) => {
-            const roles = rolesForActor(a.role);
-            return { label: a.name, roles, address: a.address, icon: iconForRole(roles), desc: a.role };
-          }),
-        );
-      })
-      .catch(() => alive && setLiveOpts([]));
+    loadPersonaOptions().then((opts) => alive && setLiveOpts(opts));
     return () => {
       alive = false;
     };
@@ -102,15 +63,10 @@ export default function PersonaSwitcher() {
                 onClick={() => {
                   connect(o.address as `0x${string}`, 'persona', o.roles, o.label);
                   setOpen(false);
-                  // No dead end: land on the desk and prompt the next step.
+                  // No dead end: land on the desk / ops console and prompt the next step.
                   const isMember = o.roles.includes('lender') || o.roles.includes('borrower');
-                  if (isMember) {
-                    navigate('/app');
-                    toast.info(`Connected as ${o.label} — next: register your key`);
-                  } else {
-                    navigate(o.roles.includes('admin') ? '/ops/admin' : o.roles.includes('keeper') ? '/ops/keeper' : '/app');
-                    toast.info(`Connected as ${o.label}`);
-                  }
+                  navigate(personaLanding(o.roles));
+                  toast.info(isMember ? `Connected as ${o.label} — next: register your key` : `Connected as ${o.label}`);
                 }}
                 className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg hover:bg-white/[0.05] transition-colors text-left"
               >

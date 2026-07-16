@@ -1,6 +1,7 @@
 import { Landmark } from 'lucide-react';
 import { StatTile } from '../components/ui/StatTile';
 import { LoanCard } from '../components/ui/LoanCard';
+import { LoanLifecycle } from '../components/ui/LoanLifecycle';
 import { EmptyState } from '../components/ui/EmptyState';
 import { HonestClaimsCallout } from '../components/ui/HonestClaimsCallout';
 import { usePositionsStore } from '../stores/usePositionsStore';
@@ -44,9 +45,9 @@ export default function PositionsPage() {
           {live.length > 0 && (
             <div>
               <div className="text-xs uppercase tracking-wider text-gray-500 mb-3">Open</div>
-              <div className="grid sm:grid-cols-2 gap-3">
+              <div className="space-y-3">
                 {live.map((l) => (
-                  <LoanCard key={l.id} loan={l} myAddress={address} />
+                  <LoanLifecycle key={l.id} loan={l} myAddress={address} />
                 ))}
               </div>
             </div>

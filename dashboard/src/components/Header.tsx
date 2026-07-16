@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { AppWindow, LineChart, Binary, LayoutDashboard, BookText, Activity, Menu, X, Landmark, Bot, Network } from 'lucide-react';
+import { AppWindow, LineChart, Binary, LayoutDashboard, BookText, Activity, Menu, X, Landmark, Bot, Network, Command } from 'lucide-react';
+import { paletteHint } from './CommandPalette';
 import clsx from 'clsx';
 import ConnectWallet from './ConnectWallet';
 import ProfileSwitch from './ProfileSwitch';
@@ -99,6 +100,14 @@ export default function Header() {
 
           {/* Right cluster */}
           <div className="hidden md:flex items-center gap-3">
+            <button
+              onClick={() => window.dispatchEvent(new Event('commandpalette:open'))}
+              className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs num text-gray-500 hover:text-white bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.05] transition-colors"
+              aria-label="Open command palette"
+              title="Command palette"
+            >
+              <Command className="w-3.5 h-3.5" /> {paletteHint}
+            </button>
             <HeaderTicker />
             <ProfileSwitch />
             <ConnectWallet />

@@ -10,7 +10,7 @@ import { useTx } from '../../hooks/useTx';
 import { useToast } from '../../contexts/ToastContext';
 import { bpsToPctLabel } from '../../lib/rates';
 import { requiredCollateral } from '../../lib/usdc';
-import { HAIRCUT_BPS } from '../../config';
+import { HAIRCUT_BPS, timeProfile } from '../../config';
 import type { Address, Loan } from '../../lib/adapter/types';
 
 export function LoanCard({ loan, myAddress }: { loan: Loan; myAddress: Address }) {
@@ -67,7 +67,7 @@ export function LoanCard({ loan, myAddress }: { loan: Loan; myAddress: Address }
       {loan.status === 'Active' && (
         <div className="text-xs mb-3">
           <Countdown targetMs={loan.deadlineAt} label="deadline in" />
-          <span className="text-gray-600 ml-2">· 6h tenor · compressed</span>
+          <span className="text-gray-600 ml-2">· {timeProfile().tenorLabel} tenor</span>
         </div>
       )}
 
