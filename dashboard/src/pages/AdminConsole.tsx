@@ -28,18 +28,28 @@ export default function AdminConsole() {
 
   const target = epoch ?? clock?.epoch ?? 0;
 
+  // Surface the REAL backend error (was a generic "Decrypt failed" that hid the cause), and
+  // translate the two expected live conditions into plain guidance: the free admin service
+  // waking/busy, and a manual print racing the autonomous keeper (epoch already printed).
+  const errMsg = (e: unknown, fallback: string) => {
+    const m = (e instanceof Error ? e.message : String(e ?? '')).trim();
+    if (/already printed|alreadyprinted|not closed|epoch not/i.test(m)) return 'Epoch already handled by the keeper — target a closed-but-unprinted epoch.';
+    if (/failed to fetch|networkerror|control .*failed|\b50[023]\b|timeout|timed out|econn/i.test(m)) return 'Admin service is waking or busy — give it a few seconds and retry.';
+    return m || fallback;
+  };
+
   const step1 = async () => {
     if (!adapter) return;
     setBusy(1); setEpoch(target);
     try { const d = await adapter.adminDecryptAggregates(target); setDepth(d); toast.info(`Decrypted ${d.length} tick aggregates for epoch ${target}`); }
-    catch { toast.error('Decrypt failed'); }
+    catch (e) { toast.error(errMsg(e, 'Decrypt failed')); }
     finally { setBusy(null); }
   };
   const step2 = async () => {
     if (!adapter) return;
     setBusy(2);
     try { const { rStarBps } = await adapter.adminComputeClearing(target); setRStar(rStarBps); }
-    catch { toast.error('Compute failed'); }
+    catch (e) { toast.error(errMsg(e, 'Compute failed')); }
     finally { setBusy(null); }
   };
   const step3 = async () => {
@@ -48,13 +58,15 @@ export default function AdminConsole() {
     if (res.ok) {
       setPrint(res.print);
       toast.success(`M-ONIA printed: ${res.print.rStarBps != null ? bpsToPctLabel(res.print.rStarBps) : 'no-trade'}`, res.txHash);
+    } else {
+      toast.error(errMsg(res.error, 'Print failed'));
     }
   };
   const step4 = async () => {
     if (!adapter) return;
     setBusy(4);
     try { const res = await adapter.adminPostMatches(target); setMatches(res.loans.length); toast.success(`Posted ${res.loans.length} matches`); }
-    catch { toast.error('Post matches failed'); }
+    catch (e) { toast.error(errMsg(e, 'Post matches failed')); }
     finally { setBusy(null); }
   };
 
