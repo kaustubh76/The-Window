@@ -37,10 +37,15 @@ export function PersonaPicker() {
   useEffect(() => {
     if (!open) return;
     restoreRef.current = document.activeElement as HTMLElement;
-    // (Re)load in case live actors changed; mock is already seeded.
-    loadPersonaOptions().then(setPersonas).catch(() => setPersonas([]));
+    // (Re)load in case live actors changed; mock is already seeded. Guard with a timeout so a
+    // HANGING (not erroring) Control API can't leave the spinner up forever — fall back to the
+    // honest empty state after 8s.
+    let done = false;
+    const settle = (o: PersonaOption[]) => { if (!done) { done = true; setPersonas(o); } };
+    loadPersonaOptions().then(settle).catch(() => settle([]));
+    const timeout = setTimeout(() => settle([]), 8000);
     const t = setTimeout(() => firstRef.current?.focus(), 0);
-    return () => clearTimeout(t);
+    return () => { clearTimeout(t); clearTimeout(timeout); };
   }, [open]);
 
   const close = () => {

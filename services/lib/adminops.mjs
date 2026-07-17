@@ -10,6 +10,13 @@ const BUILD = resolve(dirname(fileURLToPath(import.meta.url)), "../../circuits/b
 const TICKS = 37;
 export const NO_TRADE = 65535;
 
+// BSGS ceiling for the per-tick aggregate decrypt. These are WHOLE-USDC scalar sums (agents bid
+// tens-to-hundreds), so 2**31 (~2.1B units of summed depth per tick) is far above any real total
+// while staying fast (√ ≈ 46k). NOTE: use 2**31, NOT 1<<31 — JS bitwise is 32-bit SIGNED, so
+// 1<<31 is negative and Math.sqrt→NaN→BigInt throws. Matches memberops BALANCE_BSGS_MAX; over-
+// ceiling would silently break the print/clearing (same failure mode fixed on the member path).
+const DEPTH_BSGS_MAX = 2 ** 31;
+
 const egctObj = (r) => ({ c1: { x: r.c1.x, y: r.c1.y }, c2: { x: r.c2.x, y: r.c2.y } });
 
 // JS port of MONIAOracle._computeClearing (must agree on-chain or postPrint reverts).
@@ -35,8 +42,8 @@ export async function decryptDepth(H, epoch) {
     const a = await H.auction.getAggregate(epoch, ASK, t);
     const b = await H.auction.getAggregate(epoch, BID, t);
     askAgg.push(egctObj(a.egct)); bidAgg.push(egctObj(b.egct));
-    askSum.push(BigInt(decryptEGCTDirect(AUDITOR.priv, egctObj(a.egct), 1 << 20)));
-    bidSum.push(BigInt(decryptEGCTDirect(AUDITOR.priv, egctObj(b.egct), 1 << 20)));
+    askSum.push(BigInt(decryptEGCTDirect(AUDITOR.priv, egctObj(a.egct), DEPTH_BSGS_MAX)));
+    bidSum.push(BigInt(decryptEGCTDirect(AUDITOR.priv, egctObj(b.egct), DEPTH_BSGS_MAX)));
   }
   return { askAgg, bidAgg, askSum, bidSum };
 }
@@ -75,6 +82,10 @@ export async function matchEpoch(adminPk, epoch) {
   }
   const n = Math.min(lenders.length, borrowers.length);
   if (n === 0) return [];
+  // INTENTIONAL (auditor-attested loan-value design): the matched per-loan size is NOT stored
+  // on-chain. eERC transfer events carry no plaintext amount, so loan notionals are attested by
+  // the auditor off-chain (see LoanBook NatSpec + METHODOLOGY.md), and Match/Loan.cSize is a
+  // documented zero placeholder — not a dropped value. Consistent with attested fund/repay.
   const zero = { c1: { x: 0n, y: 0n }, c2: { x: 0n, y: 0n } };
   const firstId = Number(await H.book.nextLoanId());
   const ms = [];
