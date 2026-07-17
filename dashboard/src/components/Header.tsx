@@ -7,14 +7,13 @@ import ConnectWallet from './ConnectWallet';
 import ProfileSwitch from './ProfileSwitch';
 import HeaderTicker from './HeaderTicker';
 import { useSessionStore } from '../stores/useSessionStore';
-import { IS_L1 } from '../config';
 
 const baseNav = [
   { path: '/', label: 'Market', icon: LineChart },
   { path: '/explorer', label: 'Explorer', icon: Binary },
-  // The L1 story panel only exists on the permissioned L1 deployment (VITE_CHAIN_ID=43117);
-  // hidden on Fuji/local so the hosted app never shows a dead tab.
-  ...(IS_L1 ? [{ path: '/l1', label: 'L1', icon: Network }] : []),
+  // The L1 composition story is reachable everywhere; L1.tsx honestly frames which panels are
+  // live only on the sovereign L1 build vs. the real participation-leak it shows on any chain.
+  { path: '/l1', label: 'L1', icon: Network },
   { path: '/app', label: 'Trade', icon: LayoutDashboard },
   { path: '/methodology', label: 'Methodology', icon: BookText },
   { path: '/diagnostics', label: 'Diagnostics', icon: Activity },

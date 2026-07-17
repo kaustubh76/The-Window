@@ -9,7 +9,7 @@ import {
   l1Allowlist, controlActors, mintReadToken, runRevokeDemo, l1Info,
   type AllowlistRow, type ControlActor, type RevokeStep, type L1Info,
 } from '../services/control';
-import { CHAIN_LABEL, IS_L1, INDEXER_URL, FUJI_INDEXER_URL, TAGLINE } from '../config';
+import { CHAIN_LABEL, IS_L1, READ_GATED, INDEXER_URL, FUJI_INDEXER_URL, TAGLINE } from '../config';
 import { useMarketStore } from '../stores/useMarketStore';
 import { useEventFeed } from '../hooks/useEventFeed';
 import type { WindowEvent } from '../lib/adapter/types';
@@ -80,6 +80,11 @@ async function probeL1Read(asMember: string | null): Promise<ProbeResult> {
 }
 
 export default function L1() {
+  // The permissioned-L1 gates (TxAllowList precompile, member-gated reads, atomic revoke) are
+  // live only on the sovereign L1 build (43117). On a public chain we still tell the full story
+  // and show the REAL Fuji participation leak, but frame the gate panels as spec — never as a
+  // live result they can't back (honest-claims).
+  const liveL1 = IS_L1;
   const { members } = useMarketStore();
   const feed = useEventFeed();
   const recentBids = useMemo(
@@ -100,8 +105,12 @@ export default function L1() {
 
   useEffect(() => {
     let alive = true;
-    l1Info().then((i) => { if (alive) setInfo(i); }).catch(() => {});
-    l1Allowlist().then((r) => { if (alive) { setRoles(r.rows); setPrecompile(r.precompile); } }).catch(() => {});
+    // Live L1-chain identity + precompile roles only exist on the sovereign build; querying them
+    // against a public chain returns empty/placeholder, so skip and render the spec instead.
+    if (liveL1) {
+      l1Info().then((i) => { if (alive) setInfo(i); }).catch(() => {});
+      l1Allowlist().then((r) => { if (alive) { setRoles(r.rows); setPrecompile(r.precompile); } }).catch(() => {});
+    }
     controlActors().then((a) => {
       if (!alive) return;
       setActors(a);
@@ -109,9 +118,12 @@ export default function L1() {
       setAsMember(first ? first.address : null);
     }).catch(() => {});
     return () => { alive = false; };
-  }, []);
+  }, [liveL1]);
 
   useEffect(() => {
+    // The read-gate is only enforced when READ_GATED (the L1 build); probing a public indexer
+    // returns 200 for everyone, which would falsely undercut the thesis. Show the design instead.
+    if (!READ_GATED) return;
     let alive = true;
     setProbing(true);
     probeL1Read(asMember).then((r) => { if (alive) { setProbe(r); setProbing(false); } });
@@ -201,26 +213,33 @@ export default function L1() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatTile label="Chain" value="thewindowl1" icon={Network} accent="cipher" sub={CHAIN_LABEL} />
           <StatTile label="Consensus" value="PoA · WIN" sub="Subnet-EVM v0.8" />
-          <StatTile label="Members enabled" value={`${enabledCount}/5`} icon={Users} accent="up" sub="via MemberRegistry" />
+          <StatTile label="Members enabled" value={liveL1 ? `${enabledCount}/5` : '5/5'} icon={Users} accent="up" sub={liveL1 ? 'via MemberRegistry' : 'via MemberRegistry · spec'} />
           <StatTile label="TxAllowList" value="0x02…0002" icon={ShieldCheck} accent="gold" sub="precompile" />
         </div>
-        {/* live chain identity — proves the anchoring on-chain */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <StatTile
-            label="Network"
-            value={info ? (info.anchor === 'fuji' ? 'Fuji testnet' : info.anchor === 'mainnet' ? 'Mainnet' : 'Local') : '…'}
-            icon={Globe}
-            accent={info?.anchor === 'fuji' ? 'up' : 'default'}
-            sub={info?.networkID != null ? `networkID ${info.networkID}` : 'querying node…'}
-          />
-          <StatTile label="Blockchain ID" value={info?.blockchainId ? shortAddr(info.blockchainId) : '…'} icon={Hash} sub="ext/bc/<id>" />
-          <StatTile label="Validator" value={info?.nodeID ? shortAddr(info.nodeID) : (info ? 'n/a' : '…')} icon={Server} accent="cipher" sub={info?.anchor === 'fuji' ? 'local bootstrap validator' : 'node'} />
-          <StatTile label="Block height" value={info?.block != null ? String(info.block) : '…'} icon={Network} sub="demand-block" />
-        </div>
-        {!IS_L1 && (
-          <div className="glass p-3 text-xs text-signal-stale border-signal-stale/20">
-            This dashboard is pointed at a public chain — the L1 gates below are live only when connected to
-            thewindowl1 (43117). Run <span className="num">npm run dev -- --mode l1</span>.
+        {/* live chain identity — proves the anchoring on-chain (only meaningful on the L1 build) */}
+        {liveL1 && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatTile
+              label="Network"
+              value={info ? (info.anchor === 'fuji' ? 'Fuji testnet' : info.anchor === 'mainnet' ? 'Mainnet' : 'Local') : '…'}
+              icon={Globe}
+              accent={info?.anchor === 'fuji' ? 'up' : 'default'}
+              sub={info?.networkID != null ? `networkID ${info.networkID}` : 'querying node…'}
+            />
+            <StatTile label="Blockchain ID" value={info?.blockchainId ? shortAddr(info.blockchainId) : '…'} icon={Hash} sub="ext/bc/<id>" />
+            <StatTile label="Validator" value={info?.nodeID ? shortAddr(info.nodeID) : (info ? 'n/a' : '…')} icon={Server} accent="cipher" sub={info?.anchor === 'fuji' ? 'local bootstrap validator' : 'node'} />
+            <StatTile label="Block height" value={info?.block != null ? String(info.block) : '…'} icon={Network} sub="demand-block" />
+          </div>
+        )}
+        {!liveL1 && (
+          <div className="glass p-3 text-xs text-gray-400 border-cipher-500/20 flex items-start gap-2.5">
+            <Server className="w-4 h-4 text-cipher-300 flex-shrink-0 mt-0.5" />
+            <span>
+              You’re on the <span className="text-white">public Fuji</span> deployment. Below is the <span className="text-cipher-300">real</span> participation
+              leak a public chain can’t close — and the sovereign-L1 design that does. The gate panels (TxAllowList roles, member-gated
+              reads, atomic revoke) run <span className="text-white">live only on the L1 build</span>:
+              <span className="num text-gray-300"> npm run dev -- --mode l1</span> (or <span className="num text-gray-300">demo/run_l1.sh</span>).
+            </span>
           </div>
         )}
       </div>
@@ -255,14 +274,41 @@ export default function L1() {
         </div>
       </Card>
 
-      {/* ---- live TxAllowList roles ---- */}
+      {/* ---- TxAllowList roles (live on the L1 build; spec on a public chain) ---- */}
       <Card>
         <CardHeader
-          title="Live TxAllowList roles"
-          subtitle={precompile ? `precompile ${shortAddr(precompile)} · one MemberRegistry drives all four layers` : 'reading the precompile…'}
-          right={<span className="pill num bg-cipher-500/10 text-cipher-300 border border-cipher-500/20"><Radio className="w-3 h-3 inline mr-1 animate-pulse-soft" />live</span>}
+          title={liveL1 ? 'Live TxAllowList roles' : 'TxAllowList roles'}
+          subtitle={
+            liveL1
+              ? (precompile ? `precompile ${shortAddr(precompile)} · one MemberRegistry drives all four layers` : 'reading the precompile…')
+              : 'precompile 0x02…0002 · one MemberRegistry drives all four layers'
+          }
+          right={
+            liveL1 ? (
+              <span className="pill num bg-cipher-500/10 text-cipher-300 border border-cipher-500/20"><Radio className="w-3 h-3 inline mr-1 animate-pulse-soft" />live</span>
+            ) : (
+              <span className="pill num bg-white/[0.05] text-gray-400 border border-white/[0.08]"><Server className="w-3 h-3 inline mr-1" />L1-only</span>
+            )
+          }
         />
-        {!roles ? (
+        {!liveL1 ? (
+          <div className="space-y-1.5">
+            {[
+              { name: 'Keeper · Operator', role: 2 as number, note: 'enabled at genesis' },
+              { name: 'Members (lenders / borrowers)', role: 1 as number, note: 'earn access via MemberRegistry' },
+              { name: 'Intruder (never a member)', role: 0 as number, note: 'no role → cannot transact' },
+            ].map((r) => (
+              <div key={r.name} className="flex items-center justify-between py-1.5 border-b border-white/[0.03] last:border-0">
+                <span className="text-sm text-gray-300">{r.name} <span className="text-[11px] text-gray-600">· {r.note}</span></span>
+                <RolePill role={r.role} name={r.role === 2 ? 'Admin' : r.role === 1 ? 'Enabled' : 'None'} />
+              </div>
+            ))}
+            <p className="text-[11px] text-gray-600 pt-2">
+              On the sovereign L1, a <span className="num">services/allowlist</span> keeper syncs MemberAdded/Removed → the
+              precompile, so membership <em>is</em> the right to transact. Live roster + roles render here on the L1 build.
+            </p>
+          </div>
+        ) : !roles ? (
           <p className="text-xs text-gray-600 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> reading roles…</p>
         ) : (
           <div className="space-y-1">
@@ -319,7 +365,21 @@ export default function L1() {
             <div className="num text-xs text-gray-500">GET {INDEXER_URL}/members</div>
           </div>
           <div className="flex items-center justify-center min-w-[180px]">
-            {probing ? (
+            {!READ_GATED ? (
+              // Public chain: the read-gate isn't enforced here — show the L1 DESIGN outcome for
+              // the selected viewer (not a live result), so we never claim a 403 we can't back.
+              asMember ? (
+                <div className="text-center">
+                  <div className="flex items-center gap-2 text-signal-up font-semibold justify-center"><Check className="w-5 h-5" /> 200 · admitted</div>
+                  <p className="text-[10px] text-gray-600 mt-1">on the L1 build · by design</p>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <div className="flex items-center gap-2 text-signal-down font-semibold justify-center"><Ban className="w-5 h-5" /> 403 · read refused</div>
+                  <p className="text-[10px] text-gray-600 mt-1">on the L1 build · by design</p>
+                </div>
+              )
+            ) : probing ? (
               <span className="flex items-center gap-2 text-gray-500 text-sm"><Loader2 className="w-4 h-4 animate-spin" /> probing…</span>
             ) : probe?.status === 200 ? (
               <div className="flex items-center gap-2 text-signal-up font-semibold">
@@ -392,12 +452,15 @@ export default function L1() {
             <div className="flex items-center gap-2 text-sm font-semibold text-benchmark-300 mb-1">
               <Lock className="w-4 h-4" /> Permissioned L1
             </div>
-            <p className="text-xs text-gray-500 mb-4">the same competitor (a non-member) queries the L1 indexer — live</p>
+            <p className="text-xs text-gray-500 mb-4">the same competitor (a non-member) queries the L1 indexer — {liveL1 ? 'live' : 'by design'}</p>
             <div className="flex-1 flex items-center justify-center min-h-[160px]">
               <div className="text-center">
                 <Ban className="w-10 h-10 text-signal-down mx-auto mb-3" />
                 <div className="num text-signal-down font-semibold">403 · read refused</div>
-                <p className="text-xs text-gray-600 mt-2 max-w-[240px]">non-members cannot enumerate members or see any bid — participation is member-gated</p>
+                <p className="text-xs text-gray-600 mt-2 max-w-[240px]">
+                  non-members cannot enumerate members or see any bid — participation is member-gated
+                  {!liveL1 && <span className="block mt-1 text-gray-700">enforced live on the sovereign L1 build</span>}
+                </p>
               </div>
             </div>
           </div>
@@ -412,11 +475,12 @@ export default function L1() {
           right={
             <button
               onClick={runRevoke}
-              disabled={revoking}
+              disabled={revoking || !liveL1}
+              title={liveL1 ? undefined : 'Runs live on the sovereign L1 build (npm run dev -- --mode l1)'}
               className="btn btn-primary inline-flex items-center gap-2 text-sm disabled:opacity-50"
             >
-              {revoking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-              {revoking ? 'revoking…' : 'Run atomic revocation'}
+              {revoking ? <Loader2 className="w-4 h-4 animate-spin" /> : liveL1 ? <Zap className="w-4 h-4" /> : <Server className="w-4 h-4" />}
+              {!liveL1 ? 'L1 build only' : revoking ? 'revoking…' : 'Run atomic revocation'}
             </button>
           }
         />
