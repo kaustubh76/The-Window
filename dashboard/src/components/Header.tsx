@@ -154,6 +154,17 @@ export default function Header() {
                 </Link>
               );
             })}
+            <button
+              onClick={() => {
+                window.dispatchEvent(new Event('commandpalette:open'));
+                setMobileOpen(false);
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-gray-400 hover:text-white hover:bg-white/[0.04] transition-all duration-300"
+            >
+              <Command className="w-5 h-5" />
+              <span className="font-medium">Search &amp; commands</span>
+              <span className="ml-auto num text-xs text-gray-600">{paletteHint}</span>
+            </button>
             <div className="pt-4 border-t border-white/[0.04] flex items-center justify-between">
               <ProfileSwitch />
               <ConnectWallet />
