@@ -18,14 +18,16 @@ import { useSessionStore } from '../stores/useSessionStore';
 import { useAdapterStore } from '../stores/useAdapterStore';
 import { useTx } from '../hooks/useTx';
 import { useToast } from '../contexts/ToastContext';
+import { useUiStore } from '../stores/useUiStore';
 import { parseUsdc, belowMinBid, formatUsdc, microToNumber } from '../lib/usdc';
 import { bpsToPctLabel, bpsToTick, tickToBps } from '../lib/rates';
-import { PROFILE, minBidMicro } from '../config';
+import { minBidMicro } from '../config';
 import type { Address, Side, TickIndex } from '../lib/adapter/types';
 
 export default function AuctionPage() {
   const address = useSessionStore((s) => s.address) as Address;
   const persona = useSessionStore((s) => s.persona);
+  const profile = useUiStore((s) => s.profile);
   const registered = useSessionStore((s) => s.registered);
   const clock = useClock();
   const { depth, latestMonia } = useMarketStore();
@@ -71,7 +73,7 @@ export default function AuctionPage() {
   // Slider ceiling: your spendable encrypted balance, else a demo cap.
   const maxMicro = revealed ?? balances?.eercClear ?? 10_000_000000n;
   const maxUsdc = Math.max(1, Math.round(microToNumber(maxMicro)));
-  const minUsdc = Math.max(1, Math.round(microToNumber(minBidMicro(PROFILE))));
+  const minUsdc = Math.max(1, Math.round(microToNumber(minBidMicro(profile))));
   // Where a bid at the selected tick would clear relative to the last r*.
   const clears =
     tick == null || rStarTick == null
@@ -89,7 +91,7 @@ export default function AuctionPage() {
     } catch {
       return toast.error('Invalid size');
     }
-    if (belowMinBid(micro, PROFILE)) return toast.error(`Below minimum bid (${PROFILE === 'DEMO' ? '1' : '10'} USDC)`);
+    if (belowMinBid(micro, profile)) return toast.error(`Below minimum bid (${minUsdc} USDC)`);
     const res = await run((onP) => (side === 'ask' ? adapter.submitAsk(address, tick, micro, onP) : adapter.submitBid(address, tick, micro, onP)));
     if (res.ok) {
       toast.success(`Encrypted ${side === 'ask' ? 'ask' : 'bid'} submitted at ${bpsToPctLabel(tickToBps(tick))}`, res.txHash, {
@@ -146,7 +148,7 @@ export default function AuctionPage() {
                 <Lock className="w-3 h-3" /> hidden on-chain
               </span>
             </div>
-            <input className="input num" placeholder={`Size in USDC (min ${PROFILE === 'DEMO' ? '1' : '10'})`} value={size} onChange={(e) => setSize(e.target.value)} inputMode="decimal" />
+            <input className="input num" placeholder={`Size in USDC (min ${minUsdc})`} value={size} onChange={(e) => setSize(e.target.value)} inputMode="decimal" />
             <input
               type="range"
               min={minUsdc}

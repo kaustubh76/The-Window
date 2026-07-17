@@ -26,7 +26,7 @@ import type {
   UsdcMicro,
   WindowEvent,
 } from '../types';
-import { HAIRCUT_BPS } from '../../../config';
+import { HAIRCUT_BPS, TIME_PROFILES } from '../../../config';
 import { selectCrossing, tickToBps } from '../../rates';
 import { requiredCollateral } from '../../usdc';
 import { Rng, epochSeed } from './rng';
@@ -38,13 +38,14 @@ import { buildElgamal, type Elgamal } from './elgamal.browser';
 type EGCT = { c1: [any, any]; c2: [any, any] };
 
 // ---- sim timings (watchable; the dashboard is a disclosed simulation) ----
+// Derived from the single config table so the mock clock and every UI label stay in lockstep.
 interface SimTiming {
   epochLenMs: number;
   tenorMs: number;
 }
 const TIMINGS: Record<Profile, SimTiming> = {
-  DEMO: { epochLenMs: 22_000, tenorMs: 30_000 },
-  PROD: { epochLenMs: 3_600_000, tenorMs: 21_600_000 },
+  DEMO: { epochLenMs: TIME_PROFILES.DEMO.epochLenMs, tenorMs: TIME_PROFILES.DEMO.tenorMs },
+  PROD: { epochLenMs: TIME_PROFILES.PROD.epochLenMs, tenorMs: TIME_PROFILES.PROD.tenorMs },
 };
 const PH = { bidsFrom: 0.06, bidsTo: 0.72, close: 0.8, print: 0.88, match: 0.93 };
 

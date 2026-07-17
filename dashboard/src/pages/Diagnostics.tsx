@@ -4,7 +4,8 @@ import { Card, CardHeader } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { useMarketStore } from '../stores/useMarketStore';
 import { useAdapterStore } from '../stores/useAdapterStore';
-import { ADAPTER_MODE, PROFILE, CHAIN_LABEL, IS_L1, RPC_FUJI, RPC_LOCAL, INDEXER_URL, ADDRESSES } from '../config';
+import { useUiStore } from '../stores/useUiStore';
+import { ADAPTER_MODE, timeProfile, CHAIN_LABEL, IS_L1, RPC_FUJI, RPC_LOCAL, INDEXER_URL, ADDRESSES } from '../config';
 
 const GATE = [
   { k: 'Homomorphic accumulate', v: '≈ 13k gas', note: 'per-tick Σ Enc(size) via BabyJubJub._add' },
@@ -15,6 +16,8 @@ const GATE = [
 export default function Diagnostics() {
   const { history, loanBook, members } = useMarketStore();
   const adapter = useAdapterStore((s) => s.adapter);
+  const profile = useUiStore((s) => s.profile);
+  const tp = timeProfile(profile);
   const [auditor, setAuditor] = useState<[string, string] | null>(null);
 
   useEffect(() => {
@@ -48,7 +51,7 @@ export default function Diagnostics() {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatTile label="Adapter" value={ADAPTER_MODE} accent={ADAPTER_MODE === 'mock' ? 'gold' : 'cipher'} icon={Server} />
-        <StatTile label="Profile" value={PROFILE} icon={Gauge} />
+        <StatTile label="Profile" value={profile} icon={Gauge} sub={`epoch ${tp.epochLabel} · tenor ${tp.tenorLabel}`} />
         <StatTile label="Epochs printed" value={history.length} accent="gold" icon={Cpu} />
         <StatTile label="Loans cycled" value={loanBook.length} accent="cipher" icon={Cpu} sub={`${members.length} members`} />
       </div>

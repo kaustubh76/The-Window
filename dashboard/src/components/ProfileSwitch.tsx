@@ -1,13 +1,21 @@
 import clsx from 'clsx';
 import { useUiStore } from '../stores/useUiStore';
-import type { Profile } from '../config';
+import { useAdapterStore } from '../stores/useAdapterStore';
+import { timeProfile, type Profile } from '../config';
 
 const OPTIONS: Profile[] = ['DEMO', 'PROD'];
 
 // DEMO (seconds) / PROD (hours) segmented control. Demo mode is a first-class config.
+// Flipping it is the single reactive lever: it updates the shared UI profile (labels, min-bid,
+// Diagnostics) AND bridges to the adapter so the mock clock re-paces (live keeps its real clock).
 export default function ProfileSwitch() {
   const profile = useUiStore((s) => s.profile);
-  const setProfile = useUiStore((s) => s.setProfile);
+
+  const choose = (opt: Profile) => {
+    if (opt === profile) return;
+    useUiStore.getState().setProfile(opt);
+    useAdapterStore.getState().adapter?.setProfile(opt);
+  };
 
   return (
     <div
@@ -22,14 +30,14 @@ export default function ProfileSwitch() {
             key={opt}
             role="radio"
             aria-checked={active}
-            onClick={() => setProfile(opt)}
+            onClick={() => choose(opt)}
             className={clsx(
               'px-2.5 py-1 rounded-md text-[11px] font-semibold num tracking-wide transition-all duration-200',
               active
                 ? 'bg-benchmark-500/20 text-benchmark-300 shadow-inner-glow'
                 : 'text-gray-500 hover:text-gray-300',
             )}
-            title={opt === 'DEMO' ? 'Seconds — epoch 60s, tenor 5m' : 'Hours — epoch 1h, tenor 6h'}
+            title={`epoch ${timeProfile(opt).epochLabel}, tenor ${timeProfile(opt).tenorLabel}`}
           >
             {opt}
           </button>

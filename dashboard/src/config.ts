@@ -17,8 +17,10 @@ export interface TimeProfile {
   epochLabel: string;
   tenorLabel: string;
 }
+// Single source of truth for both the mock clock (engine.ts reads this) and every label.
+// DEMO matches the pace the DemoEngine actually runs at — keep them equal so labels never lie.
 export const TIME_PROFILES: Record<Profile, TimeProfile> = {
-  DEMO: { epochLenMs: 60_000, tenorMs: 300_000, label: 'DEMO', epochLabel: '60s', tenorLabel: '5m' },
+  DEMO: { epochLenMs: 22_000, tenorMs: 30_000, label: 'DEMO', epochLabel: '22s', tenorLabel: '30s' },
   PROD: { epochLenMs: 3_600_000, tenorMs: 21_600_000, label: 'PROD', epochLabel: '1h', tenorLabel: '6h' },
 };
 export function timeProfile(p: Profile = PROFILE): TimeProfile {
