@@ -198,6 +198,7 @@ export class DemoEngine {
     this.profile = p;
     this.timing = TIMINGS[p];
     this.load(this.params, this.scenarioName);
+    this.emitClock(); // push the re-paced clock now, not on the next 120ms tick
   }
   getScenario() {
     return this.scenarioName;
