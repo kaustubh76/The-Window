@@ -4,6 +4,8 @@
 // Reads come from the indexer; this service only performs actions.
 import express from "express";
 import cors from "cors";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { ethers, handles, provider, RPC } from "../lib/chain.mjs";
 import { ACTORS, AUDITOR, actorByAddress, MEMBER_NAMES } from "../lib/actors.mjs";
 import { ADMIN_PK, KEEPER_PK } from "../lib/roles.mjs";
@@ -12,6 +14,8 @@ import * as admin from "../lib/adminops.mjs";
 import "dotenv/config";
 
 const PORT = Number(process.env.CONTROL_PORT || 8899);
+const PROVE_WORKER = fileURLToPath(new URL("../lib/prove_worker.mjs", import.meta.url));
+const PRINT_SENTINEL = "__PRINT_RESULT__";
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -203,7 +207,25 @@ app.post("/member/fund", async (q, r) => { try { ok(r, await admin.confirmFundin
 app.post("/member/repay", async (q, r) => { try { ok(r, await admin.repay(ADMIN_PK, q.body.loanId)); } catch (e) { fail(r, e); } });
 
 // ---- admin ops (auditor key server-side only) ----
-app.post("/admin/print/:epoch", async (q, r) => { try { const s = t0(); const d = await admin.printEpoch(ADMIN_PK, Number(q.params.epoch)); ok(r, { ...d, proofMs: Date.now() - s }); } catch (e) { fail(r, e); } });
+// Print runs the heavy chunked Groth16 proof in a CHILD PROCESS so this event loop keeps serving
+// /health during the (slow) proof on the constrained hosted instance — otherwise the block trips
+// Render's 5s health check → SIGKILL → crash loop. The proof's memory is isolated in the child.
+app.post("/admin/print/:epoch", (q, r) => {
+  const s = t0();
+  const child = spawn(process.execPath, [PROVE_WORKER, String(Number(q.params.epoch))], { env: process.env });
+  let out = "", err = "";
+  child.stdout.on("data", (d) => (out += d));
+  child.stderr.on("data", (d) => (err += d));
+  child.on("error", (e) => fail(r, e));
+  child.on("close", (code) => {
+    const i = out.lastIndexOf(PRINT_SENTINEL);
+    let res = null;
+    if (i >= 0) { try { res = JSON.parse(out.slice(i + PRINT_SENTINEL.length).trim().split("\n")[0]); } catch { /* fallthrough */ } }
+    if (!res) return fail(r, new Error((err.trim() || out.trim()).slice(-300) || `prove worker exited ${code}`));
+    if (res.ok === false) return fail(r, new Error(res.error || "print failed"));
+    ok(r, { ...res, proofMs: Date.now() - s });
+  });
+});
 app.post("/admin/matches/:epoch", async (q, r) => { try { ok(r, { loans: await admin.matchEpoch(ADMIN_PK, Number(q.params.epoch)) }); } catch (e) { fail(r, e); } });
 app.get("/admin/decrypt/:epoch", async (q, r) => { try { const H = handles(ADMIN_PK); const { askSum, bidSum } = await admin.decryptDepth(H, Number(q.params.epoch)); ok(r, { depth: askSum.map((a, t) => ({ tick: t, bps: 100 + 25 * t, supply: a.toString(), demand: bidSum[t].toString() })) }); } catch (e) { fail(r, e); } });
 app.get("/admin/clearing/:epoch", async (q, r) => { try { const H = handles(ADMIN_PK); const { askSum, bidSum } = await admin.decryptDepth(H, Number(q.params.epoch)); const c = admin.computeClearing(askSum, bidSum); ok(r, { rStarBps: c.trade ? 100 + 25 * c.crossing : null, matched: c.matched.toString() }); } catch (e) { fail(r, e); } });

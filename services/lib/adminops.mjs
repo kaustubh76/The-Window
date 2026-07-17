@@ -11,11 +11,11 @@ const TICKS = 37;
 export const NO_TRADE = 65535;
 
 // BSGS ceiling for the per-tick aggregate decrypt. These are WHOLE-USDC scalar sums (agents bid
-// tens-to-hundreds), so 2**31 (~2.1B units of summed depth per tick) is far above any real total
-// while staying fast (√ ≈ 46k). NOTE: use 2**31, NOT 1<<31 — JS bitwise is 32-bit SIGNED, so
-// 1<<31 is negative and Math.sqrt→NaN→BigInt throws. Matches memberops BALANCE_BSGS_MAX; over-
-// ceiling would silently break the print/clearing (same failure mode fixed on the member path).
-const DEPTH_BSGS_MAX = 2 ** 31;
+// tens-to-hundreds; a tick sum is at most a handful of those), so 1<<18 (262,144 USDC/tick) is
+// far above any real total. Keep it SMALL on purpose: this runs 74× per decrypt on the 0.1-CPU
+// hosted control, and cost is √maxUnits per call — a large ceiling (2**31 → √≈46k) would block
+// the event loop for seconds and fail Render's 5s health check → OOM/kill loop. (1<<18 → √=512.)
+const DEPTH_BSGS_MAX = 1 << 18;
 
 const egctObj = (r) => ({ c1: { x: r.c1.x, y: r.c1.y }, c2: { x: r.c2.x, y: r.c2.y } });
 
@@ -33,17 +33,39 @@ export function computeClearing(askSum, bidSum) {
   return { crossing: NO_TRADE, matched: 0n, trade: false };
 }
 
-// Read + decrypt per-tick aggregates under the auditor key.
+// Bounded-concurrency map: run `fn` over items with at most `limit` in flight. A full
+// Promise.all of all 74 getAggregate calls overwhelms the public Fuji RPC (500s); a deep
+// sequential await chain (the old code) starves the event loop for ~15-30s → Render's 5s health
+// check fails → SIGKILL/crash loop. ~8 concurrent is the sweet spot: ~2-3s AND RPC-friendly.
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx]); }
+    }),
+  );
+  return out;
+}
+
+// Read + decrypt per-tick aggregates under the auditor key. Reads run with bounded concurrency
+// (fast + RPC-safe + non-blocking); decryption (BSGS) is CPU-cheap because DEPTH_BSGS_MAX is small.
 export async function decryptDepth(H, epoch) {
   const ASK = Number(await H.auction.ASK());
   const BID = Number(await H.auction.BID());
+  const jobs = [];
+  for (let t = 0; t < TICKS; t++) { jobs.push([ASK, t], [BID, t]); }
+  // Decrypt each aggregate right after its read returns — this spreads the 74 BSGS decrypts
+  // across the (async, yielding) RPC window instead of one CPU burst at the end, so the event
+  // loop keeps serving /health throughout even on the throttled 0.1-CPU hosted instance.
+  const results = await mapLimit(jobs, 8, async ([side, t]) => {
+    const raw = egctObj((await H.auction.getAggregate(epoch, side, t)).egct);
+    return { raw, sum: BigInt(decryptEGCTDirect(AUDITOR.priv, raw, DEPTH_BSGS_MAX)) };
+  });
   const askAgg = [], bidAgg = [], askSum = [], bidSum = [];
   for (let t = 0; t < TICKS; t++) {
-    const a = await H.auction.getAggregate(epoch, ASK, t);
-    const b = await H.auction.getAggregate(epoch, BID, t);
-    askAgg.push(egctObj(a.egct)); bidAgg.push(egctObj(b.egct));
-    askSum.push(BigInt(decryptEGCTDirect(AUDITOR.priv, egctObj(a.egct), DEPTH_BSGS_MAX)));
-    bidSum.push(BigInt(decryptEGCTDirect(AUDITOR.priv, egctObj(b.egct), DEPTH_BSGS_MAX)));
+    askAgg.push(results[2 * t].raw); bidAgg.push(results[2 * t + 1].raw);
+    askSum.push(results[2 * t].sum); bidSum.push(results[2 * t + 1].sum);
   }
   return { askAgg, bidAgg, askSum, bidSum };
 }
