@@ -35,6 +35,10 @@ export async function faucet(actorName, amount) {
 }
 
 // Resolve the borrower of a loan and lock its collateral.
+// The 6000/5000 defaults are the representative fallback for the keyless LIVE browser: it can't
+// decrypt the loan size client-side, and the on-chain size is auditor-attested (cSize:zero), so
+// when control receives no collMicro the solvency proof uses this representative pair (coll ≥
+// 1.2·loan). When the UI DOES have the plaintext size (mock), control passes the real coll/loan.
 export async function lockByLoan(loanId, coll = 6000, loan = 5000) {
   const H = handles();
   const L = await H.book.loans(loanId);

@@ -57,7 +57,7 @@ export default function Diagnostics() {
       </div>
 
       <Card>
-        <CardHeader title={<span className="flex items-center gap-2"><Gauge className="w-4 h-4 text-benchmark-400" /> Gate metrics</span>} subtitle="Measured on the D2 feasibility gate" />
+        <CardHeader title={<span className="flex items-center gap-2"><Gauge className="w-4 h-4 text-benchmark-400" /> Gate metrics</span>} subtitle="Benchmark figures · D2 feasibility gate" />
         <div className="space-y-2">
           {GATE.map((g) => (
             <div key={g.k} className="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0">

@@ -161,8 +161,14 @@ export class LiveAdapter implements WindowAdapter {
   submitAsk(a: Address, tick: TickIndex, size: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/bid', { address: a, side: 0, tick, size: microToEercUnit(size) })); }
   submitBid(a: Address, tick: TickIndex, size: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/bid', { address: a, side: 1, tick, size: microToEercUnit(size) })); }
   // Send the UI's real required collateral (micro-USDC) so the server's solvency proof reflects
-  // the actual loan (control converts to the whole-USDC scalar the circuit needs), not a placeholder.
-  lockCollateral(id: LoanId, amt: UsdcMicro, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/lock', { loanId: Number(id), collMicro: amt.toString() })); }
+  // the actual loan (control converts to the whole-USDC scalar the circuit needs). On the keyless
+  // LIVE browser the plaintext loan size isn't available, so amt is 0 — omit it and let control
+  // use its representative default rather than locking ZERO (the loan-value layer is auditor-
+  // attested anyway; the real per-loan size isn't on-chain — cSize:zero). Mock sends the true amt.
+  lockCollateral(id: LoanId, amt: UsdcMicro, onP?: OnProof) {
+    const body = amt > 0n ? { loanId: Number(id), collMicro: amt.toString() } : { loanId: Number(id) };
+    return this.tx(onP, () => ctrl('/member/lock', body));
+  }
   fund(id: LoanId, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/fund', { loanId: Number(id) })); }
   repay(id: LoanId, onP?: OnProof) { return this.tx(onP, () => ctrl('/member/repay', { loanId: Number(id) })); }
 

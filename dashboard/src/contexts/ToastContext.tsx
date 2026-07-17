@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { X, AlertCircle, CheckCircle, Info, AlertTriangle, ExternalLink, ArrowRight } from 'lucide-react';
-import { SNOWTRACE_URL } from '../config';
+import { SNOWTRACE_URL, ADAPTER_MODE } from '../config';
 import { EXPLORER_TX } from '../constants/ui';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -101,7 +101,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                         {toast.action.label} <ArrowRight className="w-3 h-3" />
                       </button>
                     ))}
-                  {toast.txHash && (
+                  {/* Only link out to Snowtrace on the LIVE build — mock write hashes are
+                      fabricated (MockAdapter.hash) and would 404 as "transaction not found". */}
+                  {ADAPTER_MODE === 'live' && toast.txHash && (
                     <a
                       href={EXPLORER_TX(toast.txHash, SNOWTRACE_URL)}
                       target="_blank"
