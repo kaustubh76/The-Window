@@ -6,6 +6,7 @@ import { HealthMeter } from './HealthMeter';
 import { Countdown } from './Countdown';
 import { ProofState } from './ProofState';
 import { useAdapterStore } from '../../stores/useAdapterStore';
+import { useUiStore } from '../../stores/useUiStore';
 import { useTx } from '../../hooks/useTx';
 import { useToast } from '../../contexts/ToastContext';
 import { bpsToPctLabel } from '../../lib/rates';
@@ -15,6 +16,7 @@ import type { Address, Loan } from '../../lib/adapter/types';
 
 export function LoanCard({ loan, myAddress }: { loan: Loan; myAddress: Address }) {
   const adapter = useAdapterStore((s) => s.adapter);
+  const profile = useUiStore((s) => s.profile);
   const { run, progress, running } = useTx();
   const toast = useToast();
   const isBorrower = loan.borrower.toLowerCase() === myAddress.toLowerCase();
@@ -67,7 +69,7 @@ export function LoanCard({ loan, myAddress }: { loan: Loan; myAddress: Address }
       {loan.status === 'Active' && (
         <div className="text-xs mb-3">
           <Countdown targetMs={loan.deadlineAt} label="deadline in" />
-          <span className="text-gray-600 ml-2">· {timeProfile().tenorLabel} tenor</span>
+          <span className="text-gray-600 ml-2">· {timeProfile(profile).tenorLabel} tenor</span>
         </div>
       )}
 

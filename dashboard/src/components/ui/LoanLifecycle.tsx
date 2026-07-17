@@ -8,6 +8,7 @@ import { Countdown } from './Countdown';
 import { ProofState } from './ProofState';
 import { TxLink } from './TxLink';
 import { useAdapterStore } from '../../stores/useAdapterStore';
+import { useUiStore } from '../../stores/useUiStore';
 import { useClock } from '../../hooks/useClock';
 import { useTx } from '../../hooks/useTx';
 import { useToast } from '../../contexts/ToastContext';
@@ -24,6 +25,7 @@ const STAGES = ['Matched', 'Collateralized', 'Funded', 'Settled'] as const;
 // primary action (reuses the exact lock/fund/repay adapter calls + useTx/ProofState).
 export function LoanLifecycle({ loan, myAddress }: { loan: Loan; myAddress: Address }) {
   const adapter = useAdapterStore((s) => s.adapter);
+  const profile = useUiStore((s) => s.profile);
   const clock = useClock();
   const { run, progress, running } = useTx();
   const toast = useToast();
@@ -32,7 +34,12 @@ export function LoanLifecycle({ loan, myAddress }: { loan: Loan; myAddress: Addr
   const principal = loan.size.clear ?? null; // plaintext only when entitled
   const collReq = principal != null ? requiredCollateral(principal, HAIRCUT_BPS) : null;
   // Interest is NOT settled on-chain (SOFR-style benchmark); show an explicit ESTIMATE.
-  const tenorMs = timeProfile().tenorMs;
+  // Tenor MATH uses the loan's real on-chain span so it's correct in live (chain-driven) too;
+  // fall back to the profile tenor only before the loan is funded.
+  const tenorMs =
+    loan.fundedAt && loan.deadlineAt && loan.deadlineAt > loan.fundedAt
+      ? loan.deadlineAt - loan.fundedAt
+      : timeProfile(profile).tenorMs;
   const estInterest = principal != null ? BigInt(Math.round(microToNumber(principal) * (loan.rateBps / 10_000) * (tenorMs / YEAR_MS) * 1_000_000)) : null;
 
   // stage: Matched(0) → Collateralized(1) → Funded(2) → Settled/Seized(3)
@@ -81,7 +88,7 @@ export function LoanLifecycle({ loan, myAddress }: { loan: Loan; myAddress: Addr
             <div className="text-sm font-semibold text-white num flex items-center gap-2">
               {loan.id} <span className="text-[11px] font-normal text-gray-500">{isBorrower ? 'you borrow' : 'you lend'} · epoch {loan.epoch}</span>
             </div>
-            <div className="text-[11px] text-gray-500 num">rate {bpsToPctLabel(loan.rateBps)} · {timeProfile().tenorLabel} tenor</div>
+            <div className="text-[11px] text-gray-500 num">rate {bpsToPctLabel(loan.rateBps)} · {timeProfile(profile).tenorLabel} tenor</div>
           </div>
         </div>
         <div className="flex items-center gap-2">

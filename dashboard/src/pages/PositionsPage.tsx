@@ -6,11 +6,18 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { HonestClaimsCallout } from '../components/ui/HonestClaimsCallout';
 import { usePositionsStore } from '../stores/usePositionsStore';
 import { useSessionStore } from '../stores/useSessionStore';
+import { useUiStore } from '../stores/useUiStore';
+import { timeProfile } from '../config';
 import type { Address } from '../lib/adapter/types';
 
 export default function PositionsPage() {
   const address = useSessionStore((s) => s.address) as Address;
   const { myLoans } = usePositionsStore();
+  const profile = useUiStore((s) => s.profile);
+  const tenorCopy =
+    profile === 'DEMO'
+      ? `a 6-hour tenor compressed to ${timeProfile(profile).tenorLabel}`
+      : `a ${timeProfile(profile).tenorLabel} tenor`;
 
   const live = myLoans.filter((l) => l.status === 'Pending' || l.status === 'Active');
   const settled = myLoans.filter((l) => l.status === 'Repaid' || l.status === 'Defaulted');
@@ -22,7 +29,7 @@ export default function PositionsPage() {
     <div className="max-w-4xl mx-auto space-y-5 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold text-white tracking-tight">Positions</h1>
-        <p className="text-gray-400 text-sm mt-1">Your loans — a 6-hour tenor compressed to seconds. Collateralize, fund, repay.</p>
+        <p className="text-gray-400 text-sm mt-1">Your loans — {tenorCopy}. Collateralize, fund, repay.</p>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
