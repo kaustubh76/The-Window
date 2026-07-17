@@ -9,7 +9,6 @@ import { useSessionStore } from '../stores/useSessionStore';
 import { usePositionsStore } from '../stores/usePositionsStore';
 import { useAdapterStore } from '../stores/useAdapterStore';
 import { useToast } from '../contexts/ToastContext';
-import { IS_L1 } from '../config';
 import { loadPersonaOptions, personaLanding, type PersonaOption } from '../lib/personaOptions';
 import type { Address } from '../lib/adapter/types';
 
@@ -78,7 +77,7 @@ export function CommandPalette() {
       { id: 'n-positions', label: 'Positions', group: 'Go to', icon: Landmark, run: () => go('/app/positions') },
       { id: 'n-method', label: 'Methodology', group: 'Go to', icon: BookText, run: () => go('/methodology') },
       { id: 'n-diag', label: 'Diagnostics', group: 'Go to', icon: Activity, run: () => go('/diagnostics') },
-      ...(IS_L1 ? [{ id: 'n-l1', label: 'Permissioned L1', group: 'Go to', icon: Network, run: () => go('/l1') } as Cmd] : []),
+      { id: 'n-l1', label: 'Permissioned L1', group: 'Go to', icon: Network, run: () => go('/l1') },
       ...(persona.includes('admin') ? [{ id: 'n-admin', label: 'Administrator console', group: 'Go to', icon: Landmark, run: () => go('/ops/admin') } as Cmd] : []),
       ...(persona.includes('keeper') ? [{ id: 'n-keeper', label: 'Keeper console', group: 'Go to', icon: Bot, run: () => go('/ops/keeper') } as Cmd] : []),
     ];

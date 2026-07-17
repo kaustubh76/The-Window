@@ -181,7 +181,22 @@ app.post("/member/faucet", async (q, r) => { try { const a = resolveActor(q.body
 app.post("/member/wrap", async (q, r) => { try { const a = resolveActor(q.body); const s = t0(); const d = await member.wrap(a, q.body.amount); ok(r, { ...d, proofMs: Date.now() - s }); } catch (e) { fail(r, e); } });
 app.post("/member/unwrap", async (q, r) => { try { const a = resolveActor(q.body); const s = t0(); const d = await member.unwrap(a, q.body.amount); ok(r, { ...d, proofMs: Date.now() - s }); } catch (e) { fail(r, e); } });
 app.post("/member/bid", async (q, r) => { try { const a = resolveActor(q.body); ok(r, await member.submitBid(a, q.body.side, q.body.tick, q.body.size)); } catch (e) { fail(r, e); } });
-app.post("/member/lock", async (q, r) => { try { const s = t0(); const d = await member.lockByLoan(q.body.loanId, q.body.coll, q.body.loan); ok(r, { ...d, proofMs: Date.now() - s }); } catch (e) { fail(r, e); } });
+app.post("/member/lock", async (q, r) => {
+  try {
+    const s = t0();
+    // Use the REAL collateral the UI computed (micro-USDC) → whole-USDC scalars for the
+    // solvency circuit. coll = requiredCollateral = 1.2·loan (HAIRCUT_BPS = 12000), so the
+    // proof reflects the actual loan instead of a hardcoded 6000/5000 placeholder. Falls back
+    // to explicit coll/loan (or memberops defaults) when collMicro is absent.
+    let { coll, loan } = q.body;
+    if (q.body.collMicro != null) {
+      coll = Math.round(Number(q.body.collMicro) / 1e6);
+      loan = Math.round((coll * 10000) / 12000);
+    }
+    const d = await member.lockByLoan(q.body.loanId, coll, loan);
+    ok(r, { ...d, proofMs: Date.now() - s });
+  } catch (e) { fail(r, e); }
+});
 app.get("/member/balance/:addr", async (q, r) => { try { const a = actorByAddress(q.params.addr); ok(r, a ? await member.balanceOf(a.name) : { usdc: "0", registered: false, eercClear: null }); } catch (e) { fail(r, e); } });
 // fund/repay are auditor-attested (LoanBook onlyAdmin) — the operator confirms the lock first (services/operator).
 app.post("/member/fund", async (q, r) => { try { ok(r, await admin.confirmFunding(ADMIN_PK, q.body.loanId)); } catch (e) { fail(r, e); } });
