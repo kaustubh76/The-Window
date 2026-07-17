@@ -13,16 +13,27 @@ const SHORTCUTS = 'Space play/pause · ←→ scrub · 1-4 speed · S scenario �
 // Fixed bottom control bar — mock mode only. Seeded + virtual-clock => deterministic
 // replay, safe for a live pitch.
 export default function DemoControlBar() {
-  const { playing, speed, scenario, seed, toggle, setSpeed, seek, reseed, loadScenario, stepEpoch } = useDemoStore();
+  const { playing, speed, scenario, seed, toggle, setSpeed, seek, reseed, loadScenario } = useDemoStore();
   const clock = useClock();
   const [seedInput, setSeedInput] = useState(String(seed));
+  // First-run cue: glow briefly so a judge notices the bar is drivable. Self-dismisses.
+  const [hinted, setHinted] = useState(true);
 
   const now = clock?.now ?? 0;
   const epochLen = clock?.epochLenMs ?? 22_000;
+  const openedAt = clock?.openedAt ?? 0;
   const max = Math.max(now, epochLen * 4);
   const scrubStep = Math.max(1000, epochLen * 0.08);
+  // The engine prints near epoch end (~0.88·L); 0.9·L lands just past a fresh print.
+  const printAt = openedAt + 0.9 * epochLen;
+  const nextPrintMs = now < printAt ? printAt : openedAt + epochLen + 0.9 * epochLen;
+  const secsToPrint = Math.max(0, Math.ceil((nextPrintMs - now) / 1000));
 
   useEffect(() => setSeedInput(String(seed)), [seed]);
+  useEffect(() => {
+    const t = setTimeout(() => setHinted(false), 6000);
+    return () => clearTimeout(t);
+  }, []);
 
   useKeyboardShortcuts({
     onTogglePlay: toggle,
@@ -40,25 +51,35 @@ export default function DemoControlBar() {
 
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[min(920px,94vw)]">
-      <div className="glass px-3 py-2.5 flex items-center gap-3 shadow-2xl">
-        <span className="hidden sm:inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-benchmark-400 num">
-          <FlaskConical className="w-3.5 h-3.5" /> Simulation
+      <div
+        onMouseDown={() => setHinted(false)}
+        className={clsx(
+          'glass px-3 py-2.5 flex items-center gap-3 shadow-2xl transition-shadow',
+          hinted && 'ring-2 ring-benchmark-500/40 animate-glow-pulse',
+        )}
+      >
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-benchmark-400 num flex-shrink-0">
+          <FlaskConical className="w-3.5 h-3.5" />
+          <span className="sm:hidden">Drive</span>
+          <span className="hidden sm:inline">Drive the simulation</span>
         </span>
 
         <button
           onClick={toggle}
-          className="w-9 h-9 rounded-lg bg-benchmark-500/15 text-benchmark-300 hover:bg-benchmark-500/25 flex items-center justify-center transition-colors"
+          className="w-9 h-9 rounded-lg bg-benchmark-500/15 text-benchmark-300 hover:bg-benchmark-500/25 flex items-center justify-center transition-colors flex-shrink-0"
           aria-label={playing ? 'Pause' : 'Play'}
         >
           {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
         </button>
         <button
-          onClick={stepEpoch}
-          className="w-9 h-9 rounded-lg bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] flex items-center justify-center transition-colors"
-          aria-label="Skip one epoch"
-          title="Skip one epoch"
+          onClick={() => seek(nextPrintMs)}
+          className="h-9 px-2.5 rounded-lg bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] hover:text-white flex items-center gap-1.5 transition-colors flex-shrink-0 num text-[11px]"
+          aria-label={`Skip to the next M-ONIA print (about ${secsToPrint} seconds away)`}
+          title="Jump to the next M-ONIA print"
         >
           <SkipForward className="w-4 h-4" />
+          <span className="hidden sm:inline">next print</span>
+          <span className="text-gray-500">~{secsToPrint}s</span>
         </button>
 
         {/* scrubber */}
