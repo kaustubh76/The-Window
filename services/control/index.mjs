@@ -13,7 +13,7 @@ import * as member from "../lib/memberops.mjs";
 import * as admin from "../lib/adminops.mjs";
 import "dotenv/config";
 
-const PORT = Number(process.env.CONTROL_PORT || 8899);
+const PORT = Number(process.env.CONTROL_PORT || process.env.PORT || 8899);
 const PROVE_WORKER = fileURLToPath(new URL("../lib/prove_worker.mjs", import.meta.url));
 const PRINT_SENTINEL = "__PRINT_RESULT__";
 // Indexer base for the fast admin-decrypt path: hosted URL in prod, localhost in dev.
