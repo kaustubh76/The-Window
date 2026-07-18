@@ -70,6 +70,26 @@ export async function decryptDepth(H, epoch) {
   return { askAgg, bidAgg, askSum, bidSum };
 }
 
+// Decrypt per-tick aggregates from the indexer's /aggregates payload (ONE HTTP fetch of all 74
+// ciphertexts) instead of 74 on-chain getAggregate round-trips — ~10× faster on the throttled
+// hosted control. For the DISPLAY endpoints only (/admin/decrypt, /admin/clearing); the PRINT
+// proof stays on-chain (its PoCD is bound to the on-chain accumulator). Yields periodically so
+// /health stays responsive during the BSGS burst. rows: [{side:'ask'|'bid', tick, agg:{c1,c2}}].
+export async function decryptAggsFromIndexer(rows) {
+  const askSum = new Array(TICKS).fill(0n), bidSum = new Array(TICKS).fill(0n);
+  const askAgg = new Array(TICKS), bidAgg = new Array(TICKS);
+  let n = 0;
+  for (const r of rows) {
+    const t = Number(r.tick);
+    if (!(t >= 0 && t < TICKS) || !r.agg) continue;
+    const eg = { c1: { x: r.agg.c1[0], y: r.agg.c1[1] }, c2: { x: r.agg.c2[0], y: r.agg.c2[1] } };
+    const sum = BigInt(decryptEGCTDirect(AUDITOR.priv, eg, DEPTH_BSGS_MAX));
+    if (r.side === "ask") { askSum[t] = sum; askAgg[t] = eg; } else { bidSum[t] = sum; bidAgg[t] = eg; }
+    if (++n % 6 === 0) await new Promise((res) => setImmediate(res)); // keep the event loop live
+  }
+  return { askSum, bidSum, askAgg, bidAgg };
+}
+
 // Full print: decrypt -> compute r* -> real chunked PoCD (4 x 10-tick proofs) -> postPrint.
 export async function printEpoch(adminPk, epoch) {
   const H = handles(adminPk);

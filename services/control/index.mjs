@@ -16,6 +16,22 @@ import "dotenv/config";
 const PORT = Number(process.env.CONTROL_PORT || 8899);
 const PROVE_WORKER = fileURLToPath(new URL("../lib/prove_worker.mjs", import.meta.url));
 const PRINT_SENTINEL = "__PRINT_RESULT__";
+// Indexer base for the fast admin-decrypt path: hosted URL in prod, localhost in dev.
+const INDEXER_BASE = process.env.INDEXER_URL || `http://127.0.0.1:${process.env.INDEXER_PORT || 8788}`;
+
+// Decrypt per-tick aggregate sums for an epoch. FAST path: one fetch of the indexer's
+// /aggregates ciphertexts + local decrypt (~5s vs ~55s of 74 on-chain RPC round-trips on the
+// throttled free instance). Falls back to on-chain getAggregate if the indexer is unavailable.
+async function decryptedSums(epoch) {
+  try {
+    const res = await fetch(`${INDEXER_BASE}/aggregates/${epoch}`);
+    if (res.ok) {
+      const rows = await res.json();
+      if (Array.isArray(rows) && rows.length) return await admin.decryptAggsFromIndexer(rows);
+    }
+  } catch { /* indexer down/unreachable → on-chain fallback below */ }
+  return admin.decryptDepth(handles(ADMIN_PK), epoch);
+}
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -227,8 +243,8 @@ app.post("/admin/print/:epoch", (q, r) => {
   });
 });
 app.post("/admin/matches/:epoch", async (q, r) => { try { ok(r, { loans: await admin.matchEpoch(ADMIN_PK, Number(q.params.epoch)) }); } catch (e) { fail(r, e); } });
-app.get("/admin/decrypt/:epoch", async (q, r) => { try { const H = handles(ADMIN_PK); const { askSum, bidSum } = await admin.decryptDepth(H, Number(q.params.epoch)); ok(r, { depth: askSum.map((a, t) => ({ tick: t, bps: 100 + 25 * t, supply: a.toString(), demand: bidSum[t].toString() })) }); } catch (e) { fail(r, e); } });
-app.get("/admin/clearing/:epoch", async (q, r) => { try { const H = handles(ADMIN_PK); const { askSum, bidSum } = await admin.decryptDepth(H, Number(q.params.epoch)); const c = admin.computeClearing(askSum, bidSum); ok(r, { rStarBps: c.trade ? 100 + 25 * c.crossing : null, matched: c.matched.toString() }); } catch (e) { fail(r, e); } });
+app.get("/admin/decrypt/:epoch", async (q, r) => { try { const { askSum, bidSum } = await decryptedSums(Number(q.params.epoch)); ok(r, { depth: askSum.map((a, t) => ({ tick: t, bps: 100 + 25 * t, supply: a.toString(), demand: bidSum[t].toString() })) }); } catch (e) { fail(r, e); } });
+app.get("/admin/clearing/:epoch", async (q, r) => { try { const { askSum, bidSum } = await decryptedSums(Number(q.params.epoch)); const c = admin.computeClearing(askSum, bidSum); ok(r, { rStarBps: c.trade ? 100 + 25 * c.crossing : null, matched: c.matched.toString() }); } catch (e) { fail(r, e); } });
 
 // ---- keeper ops ----
 // /keeper/open is daemon-only by design: the keeper driver (services/keeper) opens epochs
