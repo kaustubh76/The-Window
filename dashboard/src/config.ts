@@ -73,7 +73,11 @@ export const CONTROL_URL = env.VITE_CONTROL_URL ?? 'http://127.0.0.1:8899';
 export const SNOWTRACE_URL = env.VITE_SNOWTRACE_URL ?? 'https://testnet.snowtrace.io';
 // The live hosted Fuji indexer — read by the /l1 competitor pane to show the REAL
 // participation leak on a public chain (both indexers send permissive CORS).
-export const FUJI_INDEXER_URL = env.VITE_FUJI_INDEXER_URL ?? 'https://window-indexer.onrender.com';
+export const FUJI_INDEXER_URL = env.VITE_FUJI_INDEXER_URL ?? 'https://window-indexer-w3pv.onrender.com';
+// A READ_GATE=1 twin of the Fuji indexer: lets the /l1 read-gate demonstrator fire
+// REAL member-signed (200) / refused (403) requests on the public deployment. Empty →
+// the page falls back to the by-design panel. Never used by the main app reads.
+export const GATED_INDEXER_URL = env.VITE_GATED_INDEXER_URL ?? '';
 
 // ---- deployed addresses (live mode) ----
 export const ADDRESSES = {

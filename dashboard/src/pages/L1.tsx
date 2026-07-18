@@ -9,7 +9,7 @@ import {
   l1Allowlist, controlActors, mintReadToken, runRevokeDemo, l1Info,
   type AllowlistRow, type ControlActor, type RevokeStep, type L1Info,
 } from '../services/control';
-import { CHAIN_LABEL, IS_L1, READ_GATED, INDEXER_URL, FUJI_INDEXER_URL, TAGLINE } from '../config';
+import { CHAIN_LABEL, IS_L1, READ_GATED, INDEXER_URL, FUJI_INDEXER_URL, GATED_INDEXER_URL, TAGLINE } from '../config';
 import { useMarketStore } from '../stores/useMarketStore';
 import { useEventFeed } from '../hooks/useEventFeed';
 import type { WindowEvent } from '../lib/adapter/types';
@@ -64,6 +64,10 @@ interface FujiPeek {
 
 type ProbeResult = { status: number; count?: number } | null;
 
+// On the L1 build the app's own indexer is gated; on public Fuji a dedicated
+// READ_GATE=1 twin (GATED_INDEXER_URL) plays that role so the demo stays REAL.
+const GATE_PROBE_URL = READ_GATED ? INDEXER_URL : GATED_INDEXER_URL;
+
 async function probeL1Read(asMember: string | null): Promise<ProbeResult> {
   let headers: Record<string, string> = {};
   if (asMember) {
@@ -71,7 +75,7 @@ async function probeL1Read(asMember: string | null): Promise<ProbeResult> {
     if (tok) headers = { 'x-window-address': tok.address, 'x-window-sig': tok.sig };
   }
   try {
-    const res = await fetch(`${INDEXER_URL}/members`, { headers });
+    const res = await fetch(`${GATE_PROBE_URL}/members`, { headers });
     const count = res.ok ? ((await res.json()) as unknown[]).length : undefined;
     return { status: res.status, count };
   } catch {
@@ -121,9 +125,10 @@ export default function L1() {
   }, [liveL1]);
 
   useEffect(() => {
-    // The read-gate is only enforced when READ_GATED (the L1 build); probing a public indexer
-    // returns 200 for everyone, which would falsely undercut the thesis. Show the design instead.
-    if (!READ_GATED) return;
+    // Probe live whenever a gated read surface exists: the app's own indexer on the L1
+    // build, or the READ_GATE=1 twin on public Fuji. Without either, probing an ungated
+    // indexer would 200 for everyone and falsely undercut the thesis — show the design.
+    if (!GATE_PROBE_URL) return;
     let alive = true;
     setProbing(true);
     probeL1Read(asMember).then((r) => { if (alive) { setProbe(r); setProbing(false); } });
@@ -362,12 +367,12 @@ export default function L1() {
                 <>viewing as a non-member · no token</>
               )}
             </div>
-            <div className="num text-xs text-gray-500">GET {INDEXER_URL}/members</div>
+            <div className="num text-xs text-gray-500">GET {GATE_PROBE_URL || INDEXER_URL}/members</div>
           </div>
           <div className="flex items-center justify-center min-w-[180px]">
-            {!READ_GATED ? (
-              // Public chain: the read-gate isn't enforced here — show the L1 DESIGN outcome for
-              // the selected viewer (not a live result), so we never claim a 403 we can't back.
+            {!GATE_PROBE_URL ? (
+              // No gated read surface configured — show the L1 DESIGN outcome for the
+              // selected viewer (not a live result), so we never claim a 403 we can't back.
               asMember ? (
                 <div className="text-center">
                   <div className="flex items-center gap-2 text-signal-up font-semibold justify-center"><Check className="w-5 h-5" /> 200 · admitted</div>
@@ -382,15 +387,21 @@ export default function L1() {
             ) : probing ? (
               <span className="flex items-center gap-2 text-gray-500 text-sm"><Loader2 className="w-4 h-4 animate-spin" /> probing…</span>
             ) : probe?.status === 200 ? (
-              <div className="flex items-center gap-2 text-signal-up font-semibold">
-                <Check className="w-5 h-5" /> 200 · {probe.count} members visible
+              <div className="text-center">
+                <div className="flex items-center gap-2 text-signal-up font-semibold justify-center">
+                  <Check className="w-5 h-5" /> 200 · {probe.count} members visible
+                </div>
+                <p className="text-[10px] text-gray-600 mt-1">live response · member-signed read</p>
               </div>
             ) : probe?.status === 403 ? (
-              <div className="flex items-center gap-2 text-signal-down font-semibold">
-                <Ban className="w-5 h-5" /> 403 · read refused
+              <div className="text-center">
+                <div className="flex items-center gap-2 text-signal-down font-semibold justify-center">
+                  <Ban className="w-5 h-5" /> 403 · read refused
+                </div>
+                <p className="text-[10px] text-gray-600 mt-1">live response · member-gated read surface</p>
               </div>
             ) : (
-              <span className="text-gray-600 text-sm flex items-center gap-2"><X className="w-4 h-4" /> indexer unreachable</span>
+              <span className="text-gray-600 text-sm flex items-center gap-2"><X className="w-4 h-4" /> indexer waking — retoggle in ~30s</span>
             )}
           </div>
         </div>
@@ -459,7 +470,13 @@ export default function L1() {
                 <div className="num text-signal-down font-semibold">403 · read refused</div>
                 <p className="text-xs text-gray-600 mt-2 max-w-[240px]">
                   non-members cannot enumerate members or see any bid — participation is member-gated
-                  {!liveL1 && <span className="block mt-1 text-gray-700">enforced live on the sovereign L1 build</span>}
+                  {!liveL1 && (
+                    <span className="block mt-1 text-gray-700">
+                      {GATE_PROBE_URL
+                        ? 'this exact refusal is live above — flip Member / Outsider'
+                        : 'enforced live on the sovereign L1 build'}
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
@@ -524,6 +541,13 @@ export default function L1() {
           <p className="text-[11px] text-gray-600 mt-3">
             Runs live on the L1: removeMember → the allowlist keeper syncs the precompile → the ex-member’s tx is
             chain-rejected and their reads 403 → re-added to restore. Nothing is left removed.
+            {!liveL1 && (
+              <span className="block mt-1 text-gray-700">
+                Why not here: the TxAllowList precompile only exists on the sovereign L1 (Subnet-EVM) — Fuji’s shared
+                C-Chain has no such gate, which is exactly the point. Run it for real: <span className="num">demo/run_l1.sh</span> →{' '}
+                <span className="num">verify_l1_revoke</span>.
+              </span>
+            )}
           </p>
         )}
       </Card>
