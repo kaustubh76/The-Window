@@ -50,11 +50,12 @@ export default function MarketHome() {
   const hasLiveBids = depth.some((d) => d.supply > 0n || d.demand > 0n);
   const shownDepth = hasLiveBids ? depth : latestMonia?.depth ?? [];
 
-  // Skeleton during the sub-second adapter init (clock null) AND while the indexer is still cold —
-  // a cold/backfilling indexer serves epochLenMs:0 (no real clock yet), which the adapter would
-  // otherwise paint as a dead "#0 Open, rate —" hero. epochLenMs is >0 for any genuine epoch, so
-  // this never masks the honest pre-first-print period (real Open epoch, rate "—").
-  if (!clock || clock.epochLenMs === 0) {
+  // Skeleton during the sub-second adapter init (clock null) AND on a genuine cold start — a
+  // cold/backfilling indexer serves epochLenMs:0 (no real clock yet), which the adapter would
+  // otherwise paint as a dead "#0 Open, rate —" hero. Require history.length===0 too: once prints
+  // are loaded, a TRANSIENT /epoch/clock poll failure (which the adapter surfaces as epochLenMs:0
+  // for ~1s) must NOT blank the whole live hero — MoniaTicker/depth come from the store, not clock.
+  if (!clock || (clock.epochLenMs === 0 && history.length === 0)) {
     return (
       <div className="animate-fade-in">
         <MarketHeroSkeleton />

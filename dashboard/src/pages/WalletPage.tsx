@@ -42,8 +42,8 @@ export default function WalletPage() {
   const doFaucet = async () => {
     if (!adapter) return;
     setFunding(true);
-    try { const res = await adapter.faucet(address, 1000_000000n); toast.success('+1,000 TestUSDC', res.txHash); }
-    catch { toast.error('Faucet failed'); }
+    try { const res = await adapter.faucet(address, 1000_000000n); if (!res.ok) throw new Error(res.error || 'faucet failed'); toast.success('+1,000 TestUSDC', res.txHash); }
+    catch (e) { toast.error(`Faucet failed${e instanceof Error && e.message ? `: ${e.message}` : ''}`); }
     finally { setFunding(false); }
   };
   const doWrap = async () => {
