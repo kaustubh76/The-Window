@@ -39,6 +39,6 @@ jobs:
             -e AUDITOR_BJJ_PRIV="${{ secrets.AUDITOR_BJJ_PRIV }}" \
             -e AUDITOR_BJJ_PUB_X="${{ secrets.AUDITOR_BJJ_PUB_X }}" \
             -e AUDITOR_BJJ_PUB_Y="${{ secrets.AUDITOR_BJJ_PUB_Y }}" \
-            -e KEEPALIVE_URLS="https://window-indexer.onrender.com/health,https://window-control.onrender.com/health" \
+            -e KEEPALIVE_URLS="https://window-indexer-w3pv.onrender.com/health,https://window-control-opuo.onrender.com/health" \
             docker.io/kaushtubh02/thewindow-backend:latest \
             node services/drivers/index.mjs
