@@ -2,7 +2,7 @@
 // the Control API. The ONLY plaintext surface. HARD RULE: never log plaintext sizes.
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { handles, queryAll, waitTx } from "./chain.mjs";
+import { handles, queryAll, waitTx, ethers } from "./chain.mjs";
 import { AUDITOR } from "./actors.mjs";
 import { decryptEGCTDirect, genDepthArrayProof } from "../../packages/eerc-node/src/eerc.mjs";
 
@@ -143,6 +143,26 @@ export async function confirmFunding(adminPk, loanId) {
   const H = handles(adminPk);
   const { tx, rc } = await waitTx(H.book.confirmFunding(loanId, "0x" + "00".repeat(32)), { label: `confirmFunding ${loanId}` });
   return { funded: String(loanId), txHash: tx.hash, gasUsed: rc.gasUsed.toString() };
+}
+
+// Fund end-to-end from a single UI click: LoanBook.confirmFunding reverts CollateralNotLocked()
+// unless the vault escrow is Locked (2), which requires the OPERATOR to confirm the borrower's
+// Requested (1) lock. The dashboard would otherwise race the operator daemon and 400. Since the
+// control holds the operator key, confirm the escrow here (if still Requested), then fund —
+// mirroring the autonomous admin loop (services/admin/index.mjs). Idempotent under a race: if the
+// operator daemon confirmed first, confirmLock reverts but isLocked() is already true, so we fund.
+export async function fundLoan(adminPk, operatorPk, loanId) {
+  const op = handles(operatorPk);
+  const st = Number((await op.vault.locks(loanId)).state); // 0 None, 1 Requested, 2 Locked, 3 Released, 4 Seized
+  if (st === 0) throw new Error("collateral not locked yet — lock collateral first");
+  if (st === 1) {
+    try {
+      await waitTx(op.vault.confirmLock(loanId, ethers.id("op-ref-" + loanId)), { label: `confirmLock ${loanId}` });
+    } catch (e) {
+      if (!(await op.vault.isLocked(loanId))) throw e; // lost a race to the operator daemon → already Locked, proceed
+    }
+  }
+  return confirmFunding(adminPk, loanId);
 }
 export async function repay(adminPk, loanId) {
   const H = handles(adminPk);
