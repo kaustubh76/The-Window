@@ -48,6 +48,15 @@ export function LoanLifecycle({ loan, myAddress }: { loan: Loan; myAddress: Addr
   const seized = loan.status === 'Defaulted';
   const nodes = seized ? (['Matched', 'Collateralized', 'Funded', 'Seized'] as const) : STAGES;
 
+  // Turn raw LoanBook/Vault reverts into plain guidance (the tx carries only a custom-error selector).
+  const friendlyLoanError = (e?: string) => {
+    const s = (e || '').toLowerCase();
+    if (s.includes('collateralnotlocked') || s.includes('not locked')) return 'Collateral is still being confirmed — try again in a moment.';
+    if (s.includes('badstate')) return 'This loan isn’t in the right state (already funded or settled?).';
+    if (s.includes('deadlinenotreached')) return 'The loan’s deadline hasn’t passed yet.';
+    return e || 'Action failed';
+  };
+
   const act = async (kind: 'coll' | 'fund' | 'repay') => {
     if (!adapter) return;
     const size = loan.size.clear ?? 0n;
@@ -58,13 +67,14 @@ export function LoanLifecycle({ loan, myAddress }: { loan: Loan; myAddress: Addr
     });
     if (res.ok)
       toast.success(kind === 'coll' ? 'Collateral locked' : kind === 'fund' ? 'Loan funded' : 'Repaid — collateral released', res.txHash);
+    else toast.error(friendlyLoanError(res.error));
   };
 
   // whose move
   const move = (() => {
     if (loan.status === 'Repaid') return { text: 'Repaid — collateral released', tone: 'up' as const };
     if (seized) return { text: 'Defaulted — collateral seized', tone: 'down' as const };
-    if (loan.status === 'Active') return isBorrower ? { text: 'Your move: repay before the deadline', tone: 'you' as const } : { text: 'Funded — awaiting the borrower’s repayment', tone: 'wait' as const };
+    if (loan.status === 'Active') return { text: 'Active — repay to settle', tone: 'you' as const };
     // Pending — the Control locks the borrower's collateral / funds via the auditor key, so any
     // member can advance a pending request (the lifecycle, not custody, is the point of the demo).
     if (!loan.collateral) return { text: 'Needs collateral — lock it to advance this request', tone: 'you' as const };
@@ -189,7 +199,7 @@ export function LoanLifecycle({ loan, myAddress }: { loan: Loan; myAddress: Addr
             <button onClick={() => act('fund')} disabled={running} className="btn btn-primary text-xs !py-1.5 inline-flex items-center gap-1.5">
               Fund loan <ArrowRight className="w-3.5 h-3.5" />
             </button>
-          ) : loan.status === 'Active' && isBorrower ? (
+          ) : loan.status === 'Active' ? (
             <button onClick={() => act('repay')} disabled={running} className="btn btn-primary text-xs !py-1.5">
               Repay {principal != null ? formatUsdc(principal) : ''}
             </button>

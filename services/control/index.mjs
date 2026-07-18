@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { ethers, handles, provider, RPC } from "../lib/chain.mjs";
 import { ACTORS, AUDITOR, actorByAddress, MEMBER_NAMES } from "../lib/actors.mjs";
-import { ADMIN_PK, KEEPER_PK } from "../lib/roles.mjs";
+import { ADMIN_PK, KEEPER_PK, OPERATOR_PK } from "../lib/roles.mjs";
 import * as member from "../lib/memberops.mjs";
 import * as admin from "../lib/adminops.mjs";
 import { buildBabyTableAsync } from "../../packages/eerc-node/src/eerc.mjs";
@@ -265,7 +265,7 @@ app.get("/member/balance/:addr", async (q, r) => {
   } catch (e) { fail(r, e); }
 });
 // fund/repay are auditor-attested (LoanBook onlyAdmin) — the operator confirms the lock first (services/operator).
-app.post("/member/fund", async (q, r) => { try { ok(r, await admin.confirmFunding(ADMIN_PK, q.body.loanId)); } catch (e) { fail(r, e); } });
+app.post("/member/fund", async (q, r) => { try { ok(r, await admin.fundLoan(ADMIN_PK, OPERATOR_PK, q.body.loanId)); } catch (e) { fail(r, e); } });
 app.post("/member/repay", async (q, r) => { try { ok(r, await admin.repay(ADMIN_PK, q.body.loanId)); } catch (e) { fail(r, e); } });
 
 // ---- admin ops (auditor key server-side only) ----
