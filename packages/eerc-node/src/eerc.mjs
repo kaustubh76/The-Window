@@ -138,22 +138,72 @@ export async function formatProof(proof, publicSignals) {
   return { a, b, c, publicSignals: pub };
 }
 
-// Decrypt an ElGamal balance point and recover the scalar via baby-step-giant-step.
-export function bsgs(M, maxUnits = 1 << 22) {
+// Baby-step-giant-step discrete log. The baby-step table is DETERMINISTIC (depends only on
+// maxUnits + Base8), so it's built once per maxUnits and REUSED across every decrypt — rebuilding
+// the ~√maxUnits-entry table on each call was the dominant cost and, on a constrained single core
+// (0.1-CPU hosted control), blocked the event loop long enough to trip a 5s health check → SIGKILL.
+const _babyTables = new Map(); // maxUnits -> { n, table, negNG }
+
+function _tableMeta(maxUnits) {
   const n = BigInt(Math.ceil(Math.sqrt(maxUnits)));
+  const nG = mulPointEscalar(Base8, n);
+  return { n, negNG: [Fr.e(nG[0] * -1n), nG[1]] };
+}
+
+function buildBabyTable(maxUnits) {
+  let t = _babyTables.get(maxUnits);
+  if (t) return t;
+  const { n, negNG } = _tableMeta(maxUnits);
   const table = new Map();
   let cur = [0n, 1n]; // identity
   for (let j = 0n; j < n; j++) {
     table.set(cur[0].toString() + "," + cur[1].toString(), j);
     cur = addPoint(cur, Base8);
   }
-  const nG = mulPointEscalar(Base8, n);
-  const negNG = [Fr.e(nG[0] * -1n), nG[1]];
+  t = { n, table, negNG };
+  _babyTables.set(maxUnits, t);
+  return t;
+}
+
+// Same table, built with periodic setImmediate yields so the (one-time) construction never blocks
+// the event loop on a slow core. Warm this at boot (see control) so the first decrypt is cheap.
+export async function buildBabyTableAsync(maxUnits, yieldEvery = 2048) {
+  let t = _babyTables.get(maxUnits);
+  if (t) return t;
+  const { n, negNG } = _tableMeta(maxUnits);
+  const table = new Map();
+  let cur = [0n, 1n];
+  for (let j = 0n; j < n; j++) {
+    table.set(cur[0].toString() + "," + cur[1].toString(), j);
+    cur = addPoint(cur, Base8);
+    if (j % BigInt(yieldEvery) === 0n) await new Promise((r) => setImmediate(r));
+  }
+  t = { n, table, negNG };
+  _babyTables.set(maxUnits, t);
+  return t;
+}
+
+export function bsgs(M, maxUnits = 1 << 22) {
+  const { n, table, negNG } = buildBabyTable(maxUnits);
   let gamma = M;
   for (let i = 0n; i < n; i++) {
     const hit = table.get(gamma[0].toString() + "," + gamma[1].toString());
     if (hit !== undefined) return i * n + hit;
     gamma = addPoint(gamma, negNG);
+  }
+  throw new Error("bsgs: not found within maxUnits");
+}
+
+// Non-blocking BSGS: reuses the cached table and yields to the event loop during the giant-step
+// walk, so /health keeps answering while a balance is decrypted on the constrained hosted control.
+export async function bsgsAsync(M, maxUnits = 1 << 22, yieldEvery = 2048) {
+  const { n, table, negNG } = await buildBabyTableAsync(maxUnits, yieldEvery);
+  let gamma = M;
+  for (let i = 0n; i < n; i++) {
+    const hit = table.get(gamma[0].toString() + "," + gamma[1].toString());
+    if (hit !== undefined) return i * n + hit;
+    gamma = addPoint(gamma, negNG);
+    if (i % BigInt(yieldEvery) === 0n) await new Promise((r) => setImmediate(r));
   }
   throw new Error("bsgs: not found within maxUnits");
 }
@@ -165,6 +215,15 @@ export function decryptEGCT(privateKey, eGCT, maxUnits = 1 << 22) {
   const c2 = [BigInt(eGCT.c2.x), BigInt(eGCT.c2.y)];
   const M = decryptPoint(privateKey, c1, c2);
   return bsgs(M, maxUnits);
+}
+
+// Event-loop-friendly variant of decryptEGCT (same result, yields during BSGS). Use on the hosted
+// control so a balance decrypt can't starve /health.
+export async function decryptEGCTAsync(privateKey, eGCT, maxUnits = 1 << 22, yieldEvery = 2048) {
+  const c1 = [BigInt(eGCT.c1.x), BigInt(eGCT.c1.y)];
+  const c2 = [BigInt(eGCT.c2.x), BigInt(eGCT.c2.y)];
+  const M = decryptPoint(privateKey, c1, c2);
+  return bsgsAsync(M, maxUnits, yieldEvery);
 }
 
 // Decrypt with the scalar used DIRECTLY (no formatPrivKeyForBabyJub). This is the

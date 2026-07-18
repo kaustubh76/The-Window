@@ -11,6 +11,7 @@ import { ACTORS, AUDITOR, actorByAddress, MEMBER_NAMES } from "../lib/actors.mjs
 import { ADMIN_PK, KEEPER_PK } from "../lib/roles.mjs";
 import * as member from "../lib/memberops.mjs";
 import * as admin from "../lib/adminops.mjs";
+import { buildBabyTableAsync } from "../../packages/eerc-node/src/eerc.mjs";
 import "dotenv/config";
 
 const PORT = Number(process.env.CONTROL_PORT || process.env.PORT || 8899);
@@ -46,6 +47,38 @@ function resolveActor(body) {
 const ok = (res, data) => res.json({ ok: true, ...data });
 const fail = (res, e) => { console.error("[control]", e.message); res.status(400).json({ ok: false, error: e.message }); };
 const t0 = () => Date.now();
+
+// ---- balance cache -----------------------------------------------------------------------------
+// A member's eERC balance decrypt is a ~√(2**31)≈46k-step BSGS discrete-log — seconds of CPU that,
+// run inline on the 0.1-CPU hosted control, blocked the event loop and tripped Render's 5s health
+// check → SIGKILL → crash loop → 502 on every polled /member/balance. So BSGS is taken OUT of the
+// request path: decrypts run in a SERIALIZED background queue (one at a time, yielding — see
+// decryptEGCTAsync), and /member/balance serves the cached value instantly. Balances change slowly,
+// so a few seconds of staleness is invisible.
+const BAL_TTL_MS = Number(process.env.BAL_TTL_MS || 15000);
+const balCache = new Map(); // name -> { data, ts }
+const balRefreshing = new Set(); // names currently queued/decrypting
+const balQueue = [];
+let balDraining = false;
+function queueBalanceRefresh(name) {
+  if (balRefreshing.has(name)) return;
+  balRefreshing.add(name);
+  balQueue.push(name);
+  void drainBalances();
+}
+async function drainBalances() {
+  if (balDraining) return;
+  balDraining = true;
+  try {
+    while (balQueue.length) {
+      const name = balQueue.shift();
+      try { balCache.set(name, { data: await member.balanceOf(name), ts: Date.now() }); }
+      catch (e) { console.error("[control] balance refresh", name, e.message); }
+      finally { balRefreshing.delete(name); }
+      await new Promise((r) => setImmediate(r)); // let /health (and everything else) breathe between decrypts
+    }
+  } finally { balDraining = false; }
+}
 
 app.get("/health", (_q, r) => r.json({ ok: true }));
 app.get("/actors", (_q, r) => r.json(Object.values(ACTORS).map((a) => ({ name: a.name, address: a.address, role: a.role }))));
@@ -217,7 +250,20 @@ app.post("/member/lock", async (q, r) => {
     ok(r, { ...d, proofMs: Date.now() - s });
   } catch (e) { fail(r, e); }
 });
-app.get("/member/balance/:addr", async (q, r) => { try { const a = actorByAddress(q.params.addr); ok(r, a ? await member.balanceOf(a.name) : { usdc: "0", registered: false, eercClear: null }); } catch (e) { fail(r, e); } });
+app.get("/member/balance/:addr", async (q, r) => {
+  try {
+    const a = actorByAddress(q.params.addr);
+    if (!a) return ok(r, { usdc: "0", registered: false, eercClear: null, eercEncrypted: null });
+    const c = balCache.get(a.name);
+    if (!c || Date.now() - c.ts >= BAL_TTL_MS) queueBalanceRefresh(a.name); // background decrypt; never blocks this request
+    if (c) return ok(r, c.data); // serve cached (fresh, or slightly stale while a refresh runs) instantly
+    // First-ever request for this member: return the cheap on-chain fields now (no BSGS); the
+    // encrypted balance fills in on the next poll once the background decrypt completes.
+    const H = handles();
+    const [usdc, registered] = await Promise.all([H.usdc.balanceOf(a.address), H.registrar.isUserRegistered(a.address)]);
+    ok(r, { usdc: usdc.toString(), registered, eercClear: null, eercEncrypted: null, computing: registered });
+  } catch (e) { fail(r, e); }
+});
 // fund/repay are auditor-attested (LoanBook onlyAdmin) — the operator confirms the lock first (services/operator).
 app.post("/member/fund", async (q, r) => { try { ok(r, await admin.confirmFunding(ADMIN_PK, q.body.loanId)); } catch (e) { fail(r, e); } });
 app.post("/member/repay", async (q, r) => { try { ok(r, await admin.repay(ADMIN_PK, q.body.loanId)); } catch (e) { fail(r, e); } });
@@ -255,3 +301,12 @@ app.post("/keeper/close", async (_q, r) => { try { const tx = await handles(KEEP
 app.post("/keeper/seize", async (q, r) => { try { const tx = await handles(KEEPER_PK).book.seize(q.body.loanId); const rc = await tx.wait(); ok(r, { seized: q.body.loanId, txHash: tx.hash, gasUsed: rc.gasUsed.toString() }); } catch (e) { fail(r, e); } });
 
 app.listen(PORT, () => console.log(`[control] on :${PORT} (member/admin/keeper write API)`));
+
+// Warm the BSGS baby-step table (built once, reused by every balance decrypt) and prime each
+// member's balance cache — all in the background with event-loop yields, so /health answers
+// immediately from boot and the first /member/balance is already cached.
+(async () => {
+  try { await buildBabyTableAsync(member.BALANCE_BSGS_MAX); console.log("[control] BSGS table warmed"); }
+  catch (e) { console.error("[control] table warm failed:", e.message); }
+  for (const n of MEMBER_NAMES) queueBalanceRefresh(n);
+})();
