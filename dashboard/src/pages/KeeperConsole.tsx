@@ -25,15 +25,15 @@ export default function KeeperConsole() {
   const closeEpoch = async () => {
     if (!adapter || !clock) return;
     setClosing(true);
-    try { const res = await adapter.closeEpoch(clock.epoch); toast.success(`Closed epoch ${clock.epoch}`, res.txHash); }
-    catch { toast.error('Close failed'); }
+    try { const res = await adapter.closeEpoch(clock.epoch); if (!res.ok) throw new Error(res.error || 'close failed'); toast.success(`Closed epoch ${clock.epoch}`, res.txHash); }
+    catch (e) { toast.error(`Close failed${e instanceof Error && e.message ? `: ${e.message}` : ''}`); }
     finally { setClosing(false); }
   };
   const seize = async (id: string) => {
     if (!adapter) return;
     setSeizing(id);
-    try { const res = await adapter.seize(id); toast.success(`Seized collateral for ${id}`, res.txHash); }
-    catch { toast.error('Seize failed'); }
+    try { const res = await adapter.seize(id); if (!res.ok) throw new Error(res.error || 'seize failed'); toast.success(`Seized collateral for ${id}`, res.txHash); }
+    catch (e) { toast.error(`Seize failed${e instanceof Error && e.message ? `: ${e.message}` : ''}`); }
     finally { setSeizing(null); }
   };
 

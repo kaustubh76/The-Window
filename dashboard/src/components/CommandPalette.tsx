@@ -98,7 +98,7 @@ export function CommandPalette() {
     if (addr) {
       actions.push({
         id: 'a-faucet', label: 'Faucet +1,000 TestUSDC', group: 'Actions', icon: Droplet,
-        run: async () => { close(); const r = await adapter()?.faucet(addr, 1000_000000n); toast.success('+1,000 TestUSDC', r?.txHash); },
+        run: async () => { close(); const r = await adapter()?.faucet(addr, 1000_000000n); if (r?.ok) toast.success('+1,000 TestUSDC', r.txHash); else toast.error(`Faucet failed${r?.error ? `: ${r.error}` : ''}`); },
       });
       if (!registered) actions.push({
         id: 'a-register', label: 'Register encryption key', group: 'Actions', icon: KeyRound,
