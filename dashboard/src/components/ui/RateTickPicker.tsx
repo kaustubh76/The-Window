@@ -10,11 +10,13 @@ export function RateTickPicker({
   onChange,
   rStarTick,
   side,
+  taken,
 }: {
   value: TickIndex | null;
   onChange: (t: TickIndex) => void;
   rStarTick?: TickIndex | null;
   side: 'ask' | 'bid';
+  taken?: Set<number>; // ticks this member already bid this epoch (re-bidding reverts AlreadyBidHere)
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const ticks = allTicks();
@@ -43,21 +45,23 @@ export function RateTickPicker({
           const whole = bps % 100 === 0;
           const selected = value === tick;
           const isStar = rStarTick === tick;
+          const isTaken = taken?.has(tick) ?? false;
           return (
             <button
               key={tick}
               role="radio"
               aria-checked={selected}
-              aria-label={label}
+              aria-label={isTaken ? `${label} — already bid` : label}
               onClick={() => onChange(tick)}
               className={clsx(
                 'relative flex-shrink-0 w-3 rounded-sm transition-all duration-150',
-                selected ? 'bg-benchmark-500' : isStar ? 'bg-cipher-500/50' : 'bg-white/[0.08] hover:bg-white/[0.16]',
+                selected ? 'bg-benchmark-500' : isTaken ? 'bg-white/[0.05] opacity-40' : isStar ? 'bg-cipher-500/50' : 'bg-white/[0.08] hover:bg-white/[0.16]',
               )}
               style={{ height: whole ? 28 : 18 }}
-              title={label}
+              title={isTaken ? `${label} — you already bid here this epoch` : label}
             >
               {isStar && !selected && <span className="absolute -top-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-cipher-400" />}
+              {isTaken && !selected && <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-px bg-gray-500" />}
             </button>
           );
         })}
