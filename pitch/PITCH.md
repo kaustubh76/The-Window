@@ -136,7 +136,7 @@ Two disclosed trusted surfaces (eERC's `PrivateTransfer` carries no plaintext am
 | ZK gates | on-chain regression tests: tampered ciphertext fails, tampered haircut fails, **cross-chunk proof swap fails**, wrong claimed r* reverts |
 | Dashboard | React/Vite · 30 tests incl. the **honest-claims CI lint** · live/mock adapter with **no silent fallback** — if services are down you see a banner, never fake data |
 | Reproducibility | `make demo` — **zero secrets needed**: fresh clone → local Anvil → full epoch with real proofs. Judges can verify everything themselves |
-| Ops | hosted: Vercel (frontend) + Render (indexer + write API from a Docker image); drivers autonomous; indexer is stateless — rebuilds everything from chain events |
+| Ops | hosted: Vercel (frontend) + Render (indexer + write API from a Docker image); drivers run autonomously 24/7 on GitHub Actions; indexer is stateless — rebuilds everything from chain events |
 
 ---
 

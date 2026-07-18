@@ -5,27 +5,38 @@ separate from the *on-chain* Fuji deployment in [06-demo-and-ops](06-demo-and-op
 deployment" (that already put the contracts on-chain); this doc is about hosting the **off-chain**
 frontend + read/write APIs so anyone can use the dashboard from a browser.
 
-> The `the_window_architecture.excalidraw` diagram is intentionally **not** changed by this work —
-> hosting is an ops overlay, and the tx-surfacing feature only added fields/UI, not new on-chain or
-> service *flows*. The diagram still reflects the true architecture.
+> The `the_window_architecture.excalidraw` diagram **does** depict this hosting layer: it is
+> script-generated (`scripts/regen_architecture_diagram.py` reads the hand-authored
+> `the_window_architecture.base.excalidraw` and writes the canonical file) and includes a
+> **HOSTING & AUTOMATION** band (Vercel · Render indexer/control · Docker Hub · GitHub Actions
+> drivers · Fuji) plus a "why this wins a speedrun" callout. Regen + validate:
+> `python3 scripts/regen_architecture_diagram.py && python3 scripts/check_diagram_overlaps.py`.
 
 ## Live URLs (current)
 
 | Piece | URL | Notes |
 |---|---|---|
 | Frontend | **https://the-window-five.vercel.app** | Vercel, project `the-window`, account `kaustubh76` |
-| Indexer (read API) | **https://window-indexer.onrender.com** | Render web service `srv-d99i04m7r5hc73b9kl90` |
-| Control (write API) | **https://window-control.onrender.com** | Render web service `srv-d99i05faqgkc7388064g` |
+| Indexer (read API) | **https://window-indexer-w3pv.onrender.com** | Render web service `srv-d9dgsof7f7vs738k1bk0` |
+| Control (write API) | **https://window-control-opuo.onrender.com** | Render web service `srv-d9dgsvrbc2fs73e09tc0` |
 | Backend image | `docker.io/kaushtubh02/thewindow-backend:latest` | public Docker Hub repo |
-| Render owner id | `tea-d5pi8nogjchc73dv1ikg` | needed for API service creation |
+| Render owner id | `tea-d9dgp6n41pts73d3ueu0` | current (2nd) Render account; needed for API service creation |
+
+> **Render account migration (2026-07-18):** the ORIGINAL Render account hit the free-tier
+> **750 instance-hours/month** cap and Render **`billing`-suspended all its services** — and
+> billing-suspended services **cannot be resumed via the API** (only user-suspended ones can),
+> so the backend was **redeployed to a fresh Render account** (the URLs/IDs above). The old,
+> suspended services (`window-indexer.onrender.com` `srv-d99i04m7r5hc73b9kl90`,
+> `window-control.onrender.com` `srv-d99i05faqgkc7388064g`) are dead — kept here only so old
+> links/logs are traceable.
 
 ## Topology
 
 ```
  browser ──HTTPS──► Vercel (static dist, VITE_ADAPTER=live)
    │                    │  fetches
-   │                    ├──► https://window-indexer.onrender.com   (reads: /events /loans /monia/* …)
-   │                    └──► https://window-control.onrender.com   (writes: /member/* /admin/* /keeper/*)
+   │                    ├──► https://window-indexer-w3pv.onrender.com   (reads: /events /loans /monia/* …)
+   │                    └──► https://window-control-opuo.onrender.com   (writes: /member/* /admin/* /keeper/*)
    └──HTTPS──► Fuji C-Chain RPC (viem/wagmi, direct, no backend)
 
  Render window-indexer / window-control  ──► Fuji RPC (read chain / send txs)
@@ -73,14 +84,17 @@ Resulting image is ~352 MB. See [07](07-decisions-and-gotchas.md) for the arm64/
 
 Two **free web services**, both from the one image, differing only in start command + env:
 
-| Service | id | dockerCommand | port env |
+| Service | id | dockerCommand | port |
 |---|---|---|---|
-| `window-indexer` | `srv-d99i04m7r5hc73b9kl90` | `node services/indexer/index.mjs` | `INDEXER_PORT=10000` |
-| `window-control` | `srv-d99i05faqgkc7388064g` | `node services/control/index.mjs` | `CONTROL_PORT=10000` |
+| `window-indexer` | `srv-d9dgsof7f7vs738k1bk0` | `node services/indexer/index.mjs` | reads `$PORT` |
+| `window-control` | `srv-d9dgsvrbc2fs73e09tc0` | `node services/control/index.mjs` | reads `$PORT` |
 
 - `dockerCommand` is a **plain exec** string — NOT `sh -c '…'` (Render tokenizes naively → exit 127;
-  see [07](07-decisions-and-gotchas.md)). Since we can't expand `$PORT` in the command, we set the
-  port env vars to `10000` (Render's default `$PORT`) statically instead.
+  see [07](07-decisions-and-gotchas.md)). Rather than expand `$PORT` in the command, the services
+  **read `process.env.PORT` directly** (PR #15): `const PORT = Number(process.env.INDEXER_PORT ||
+  process.env.PORT || 8787)` (control: `CONTROL_PORT || PORT || 8899`). Render injects `$PORT` and
+  routes to it, so the plain command Just Works — no static port env var needed. (`control` also
+  needs `INDEXER_URL` = the indexer's public URL, since it calls the indexer for some reads.)
 - Env vars (set from the root `.env`): all actor PKs (`ADMIN_PK`, `KEEPER_PK`, `VAULT_OPERATOR_PK`,
   `LENDER1_PK`, `LENDER2_PK`, `BORROWER_PK`, `AGENT4_PK`, `AGENT5_PK`), auditor
   `AUDITOR_BJJ_PRIV`/`PUB_X`/`PUB_Y`, `RPC_LOCAL=https://api.avax-test.network/ext/bc/C/rpc` (chain.mjs
@@ -89,8 +103,8 @@ Two **free web services**, both from the one image, differing only in start comm
 - `RENDER_API_KEY` lives in the root `.env`. Manage services via the REST API, e.g. create:
   ```
   POST https://api.render.com/v1/services      (Bearer $RENDER_API_KEY)
-  { "type":"web_service", "name":"window-indexer", "ownerId":"tea-d5pi8nogjchc73dv1ikg",
-    "image": { "ownerId":"tea-d5pi8nogjchc73dv1ikg", "imagePath":"docker.io/kaushtubh02/thewindow-backend:latest" },
+  { "type":"web_service", "name":"window-indexer", "ownerId":"tea-d9dgp6n41pts73d3ueu0",
+    "image": { "ownerId":"tea-d9dgp6n41pts73d3ueu0", "imagePath":"docker.io/kaushtubh02/thewindow-backend:latest" },
     "serviceDetails": { "runtime":"image", "plan":"free", "region":"oregon",
                         "healthCheckPath":"/health",
                         "envSpecificDetails": { "dockerCommand":"node services/indexer/index.mjs" } },
@@ -105,8 +119,8 @@ The dashboard is deployed as a **prebuilt static `dist`**, not a Vercel source-b
 baked backend URLs deterministic (see [07](07-decisions-and-gotchas.md)).
 
 - Build env: `dashboard/.env.production` (gitignored; Vite loads it in `build` mode) — `VITE_ADAPTER=live`,
-  `VITE_CHAIN_ID=43113`, `VITE_RPC_FUJI=<public Fuji RPC>`, `VITE_INDEXER_URL=https://window-indexer.onrender.com`,
-  `VITE_CONTROL_URL=https://window-control.onrender.com`, and all `VITE_*_ADDR` from `dashboard/.env`.
+  `VITE_CHAIN_ID=43113`, `VITE_RPC_FUJI=<public Fuji RPC>`, `VITE_INDEXER_URL=https://window-indexer-w3pv.onrender.com`,
+  `VITE_CONTROL_URL=https://window-control-opuo.onrender.com`, and all `VITE_*_ADDR` from `dashboard/.env`.
 - `cd dashboard && npm run build` → copy `dist/*` into `dashboard/.vercel_static/` (gitignored) + a
   `vercel.json` SPA rewrite: `{ "rewrites": [{ "source": "/((?!assets/|window.svg).*)", "destination": "/index.html" }] }`
   (excludes real static assets from the catch-all).
@@ -153,7 +167,10 @@ speed; Render free instances at 0.1 CPU would take minutes per proof):
 
 - Free web services **cold-start** (~30–60 s) after ~15 min idle and share a **750 instance-hours/
   month cap across the whole Render workspace** (other projects included). The driver keep-alive
-  keeps indexer+control warm ~24/7 while the workflow runs — watch workspace usage after judging.
+  keeps indexer+control warm ~24/7 while the workflow runs — but that warmth **burns the cap**: it's
+  exactly what suspended the first Render account (see the migration note up top). Watch workspace
+  usage; if it suspends again, redeploy the image to yet another free account and repoint
+  `dashboard/.env.production` + the workflow's `KEEPALIVE_URLS`.
 - `control` is open-CORS + unauthenticated by design and holds throwaway Fuji actor keys as Render env
   secrets — acceptable for a testnet demo, **never** for real value.
 

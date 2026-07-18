@@ -119,10 +119,12 @@ Registry with all keys/scalars: `services/lib/actors.mjs` (Anvil defaults, env-o
 
 ## 7. Where the diagram lives
 
-`the_window_architecture.excalidraw` at repo root — regenerated 2026-07-11 to match the post-Control-API
-implementation (lanes: Actors | Dashboard | Off-chain services | On-chain; bands: Circuits, Demo/Ops;
-numbered arrows R1–R2 read path, W1–W4 write path, 1–10 autonomous loop, plus internal on-chain and
-artifact wiring). Diagram-sync status (verified 2026-07-12): the diagram ALREADY reflects the chunked
+`the_window_architecture.excalidraw` at repo root — **script-generated** by
+`scripts/regen_architecture_diagram.py` (from the hand-authored `the_window_architecture.base.excalidraw`;
+validate with `scripts/check_diagram_overlaps.py`). Lanes: Actors | Dashboard | Off-chain services |
+On-chain; bands: Circuits, Demo/Ops, **Hosting & Automation** (Vercel · Render · Docker · GitHub Actions ·
+Fuji); numbered arrows R1–R2 read path, W1–W4 write path, 1–10 autonomous loop, plus internal on-chain and
+artifact wiring, a color legend, and a **"why this wins a speedrun"** callout. Diagram-sync status (verified 2026-07-12): the diagram ALREADY reflects the chunked
 PoCD (4 × 102-signal proofs, 17.9 KB verifier) and the live Fuji deployment; the last two stale labels
 (`run_demo.sh` "code-size 200k", monolith-era `_buildPublicSignals`) were fixed in the pre-submission
 hardening pass. If you change the architecture, regenerate/update the diagram AND this file.

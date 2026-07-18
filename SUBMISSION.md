@@ -18,7 +18,7 @@ Deadline: **July 19, 2026, 03:29 IST** · Portal: Avalanche Builder Hub (the eve
 | | |
 |---|---|
 | Live app (Fuji) | https://the-window-five.vercel.app |
-| Read API | https://window-indexer.onrender.com/monia/latest |
+| Read API | https://window-indexer-w3pv.onrender.com/monia/latest |
 | AuctionHouse (Snowtrace) | https://testnet.snowtrace.io/address/0xd001d287d7e62fE1118C42E49E3fe461e010a71e |
 | MONIAOracle (Snowtrace) | https://testnet.snowtrace.io/address/0xD1979c145d70009e6D84AB82A590E13a0026CEc2 |
 | One-liner | Private machine money market on Avalanche: encrypted eERC auctions print M-ONIA — a ZK-proven benchmark rate. The rate is public. The borrowing never was. |
@@ -42,7 +42,7 @@ Deadline: **July 19, 2026, 03:29 IST** · Portal: Avalanche Builder Hub (the eve
 1. Drivers are already running in the cloud (`gh run list --workflow fuji-drivers` shows
    an active run; auction advances every ~120 s). Manual kick if ever needed:
    `gh workflow run fuji-drivers`.
-2. Sanity: `curl https://window-indexer.onrender.com/health` — `lastBlock` near Fuji head;
+2. Sanity: `curl https://window-indexer-w3pv.onrender.com/health` — `lastBlock` near Fuji head;
    open the live app, check the "Live on-chain activity" feed shows fresh Snowtrace txs.
 3. If the public Fuji RPC rate-limits the drivers (500s in the GH run log), re-dispatch
    the workflow — or fall back to local `bash demo/run_fuji.sh` (disable the workflow
