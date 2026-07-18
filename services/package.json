@@ -8,7 +8,8 @@
     "indexer": "node indexer/index.mjs",
     "keeper": "node keeper/index.mjs",
     "admin": "node admin/index.mjs",
-    "agents": "node agents/index.mjs"
+    "agents": "node agents/index.mjs",
+    "test": "node --test lib/"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -79,6 +79,33 @@ export function wallet(pk) {
   return new FreshNonceManager(new ethers.Wallet(pk, provider));
 }
 
+// Bound every send. ethers' tx.wait() polls indefinitely, and eth_sendRawTransaction can hang on a
+// flaky public RPC — either silently freezes a driver's single-threaded loop FOREVER (no crash, so
+// the supervisor's exit-only restart never fires; the market's prints stall while agents keep
+// bidding). Race the whole send+confirm against a timeout and THROW on expiry so the caller's tick
+// catches, logs, and retries next round. Safe with FreshNonceManager: it re-syncs the nonce from
+// the chain's pending count before each send, so a timed-out tx that lands late doesn't desync the
+// next attempt. Pass the contract-call promise (or a TransactionResponse) as `txOrPromise`.
+export async function waitTx(txOrPromise, { timeoutMs = 90_000, confirmations = 1, label = "" } = {}) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`tx ${label || ""} not mined in ${Math.round(timeoutMs / 1000)}s`.replace("  ", " "))),
+      timeoutMs,
+    );
+  });
+  const settle = (async () => {
+    const tx = await txOrPromise; // resolves the send itself (also bounded by the race)
+    const rc = await tx.wait(confirmations);
+    return { rc, tx };
+  })();
+  try {
+    return await Promise.race([settle, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function contract(addr, name, signerOrPk) {
   const runner = typeof signerOrPk === "string" ? wallet(signerOrPk) : (signerOrPk || provider);
   return new ethers.Contract(addr, abi(name), runner);

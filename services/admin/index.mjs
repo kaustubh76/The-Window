@@ -3,7 +3,7 @@
 // then drives each loan: borrower locks collateral (real solvency proof) -> operator
 // confirms -> admin funds (attested) -> repay-most / default-one (keeper seizes the
 // defaulter). Makes the unattended stack cycle loans end-to-end. Never logs plaintext.
-import { handles } from "../lib/chain.mjs";
+import { handles, provider, waitTx } from "../lib/chain.mjs";
 import { actorByAddress } from "../lib/actors.mjs";
 import { ADMIN_PK, OPERATOR_PK } from "../lib/roles.mjs";
 import { printEpoch, matchEpoch, confirmFunding, repay } from "../lib/adminops.mjs";
@@ -17,7 +17,18 @@ const POLL_MS = Number(process.env.ADMIN_POLL_MS || 4000);
 // backfill would grind for days and drain the admin's gas on history nobody reads
 // (the dashboard shows the recent window; older gaps read as stale epochs).
 const BACKFILL = Number(process.env.ADMIN_BACKFILL_EPOCHS || 25);
+// A broke/failing HEAD epoch must not starve the backlog: attempt up to this many Closed
+// epochs per tick (newest first), stopping early on the first success so the headline stays
+// fresh without over-proving. (Ascending order once wedged the admin for hours; newest-first
+// alone still let a persistently-failing head monopolize every tick — this bounds that.)
+const MAX_ATTEMPTS = Number(process.env.ADMIN_MAX_ATTEMPTS_PER_TICK || 3);
+// Below this the admin can't pay for a print (~4.4M gas). Surface it LOUDLY — otherwise gas
+// exhaustion looks identical to a healthy market (agents/keeper on other keys keep going) while
+// r*/M-ONIA silently freezes. No auto-faucet: Fuji AVAX faucets are web/captcha; top up manually.
+const LOW_GAS_WEI = ethers.parseEther(process.env.ADMIN_MIN_AVAX || "0.01");
+const ADMIN_ADDR = new ethers.Wallet(ADMIN_PK).address;
 const handled = new Set();
+let gasTick = 0;
 
 async function processEpoch(epoch) {
   const print = await printEpoch(ADMIN_PK, epoch);
@@ -45,7 +56,7 @@ async function processEpoch(epoch) {
       lock = await H.vault.locks(id);
     }
     if (Number(lock.state) === 1) {
-      try { await (await op.vault.confirmLock(id, ethers.id("ref" + id))).wait(); } catch {}
+      try { await waitTx(op.vault.confirmLock(id, ethers.id("ref" + id)), { label: `confirmLock ${id}`, timeoutMs: 60_000 }); } catch {}
       lock = await H.vault.locks(id);
     }
     if (Number(lock.state) !== 2 /*Locked*/) throw new Error(`loan ${id}: lock never confirmed`);
@@ -63,19 +74,34 @@ async function processEpoch(epoch) {
 async function tick() {
   try {
     const H = handles(ADMIN_PK);
+    // Gas self-check (~every 15 ticks): a drained admin key fails every print, but the market
+    // still LOOKS live (keeper/agents sign with other keys) — make the real cause obvious in logs.
+    if (gasTick++ % 15 === 0) {
+      try {
+        const bal = await provider.getBalance(ADMIN_ADDR);
+        if (bal < LOW_GAS_WEI) console.warn(`[admin] LOW GAS ${ethers.formatEther(bal)} AVAX at ${ADMIN_ADDR} — prints will FAIL until funded (Fuji faucet)`);
+      } catch { /* balance read is best-effort */ }
+    }
     const cur = Number(await H.auction.currentEpoch());
-    // NEWEST first, ONE epoch per tick: the headline M-ONIA print stays fresh while
-    // any backlog backfills behind it, and one failing epoch can never starve the
-    // head (ascending processing once wedged the admin on a single epoch for hours).
+    // NEWEST first: the headline M-ONIA print stays fresh while any backlog backfills behind it.
+    // Attempt up to MAX_ATTEMPTS Closed epochs per tick, stopping on the first SUCCESS — so a
+    // persistently-failing head (out of gas, dropped tx, RPC flake) can no longer monopolize
+    // every tick and freeze all prints; the loop moves on to older pending epochs.
+    let attempts = 0;
     for (let e = cur; e >= 1; e--) {
       if (handled.has(e)) continue;
       if (e < cur - BACKFILL) { handled.add(e); continue; } // beyond the backfill window — leave unprinted
       const status = Number(await H.auction.epochStatus(e));
       if (status === 3 /*Printed*/) { handled.add(e); continue; } // don't re-read forever
-      if (status === 2 /*Closed*/) {
-        handled.add(e);
-        await processEpoch(e).catch((err) => { handled.delete(e); throw err; });
-        break;
+      if (status !== 2 /*Closed*/) continue; // Open/None — look at an older epoch
+      handled.add(e);
+      try {
+        await processEpoch(e);
+        break; // printed the newest reachable epoch — headline is fresh; yield the tick
+      } catch (err) {
+        handled.delete(e); // re-arm for a later retry
+        console.error(`[admin] epoch ${e} failed: ${err.message}`);
+        if (++attempts >= MAX_ATTEMPTS) break; // bounded work per tick — don't spin forever
       }
     }
   } catch (e) {
