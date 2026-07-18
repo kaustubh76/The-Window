@@ -1,22 +1,23 @@
 // Indexer — read-only. Rebuilds WINDOW state from chain events and serves a REST
 // API shaped to the dashboard's frozen adapter types (dashboard/src/lib/adapter/types.ts).
-// Crash-safe: no persistence, re-derives everything from chain on boot + poll.
-// Logs are fetched INCREMENTALLY (append-only cursor): public RPCs cap getLogs
-// ranges, and rescanning deploy->head every tick grows without bound on Fuji.
+// Re-derives everything from chain on boot + poll; a baked snapshot (services/indexer/snapshot.json,
+// see scripts/gen_indexer_snapshot.mjs) seeds the log store so a cold boot resumes from near-head
+// instead of re-scanning ~140k blocks (~7-10 min of blank market). Absent/stale snapshot → full
+// backfill (crash-safe fallback). Logs are fetched INCREMENTALLY (append-only cursor): public RPCs
+// cap getLogs ranges, and rescanning deploy->head every tick grows without bound on Fuji.
 import express from "express";
 import cors from "cors";
-import { provider, handles, queryAll, START_BLOCK, ethers } from "../lib/chain.mjs";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import { provider, handles, queryAll, START_BLOCK, CHAIN_ID, ethers } from "../lib/chain.mjs";
+import { buildFilters } from "./filters.mjs";
+import { NO_TRADE, bps, cipher, decodeRatePrint, loanSizeCipher } from "./derive.mjs";
 
 // Bind to Render's assigned $PORT when present (image-based Render services inject PORT and
 // route to it) — falls back to INDEXER_PORT / 8787 for local + the driver container.
 const PORT = Number(process.env.INDEXER_PORT || process.env.PORT || 8787);
-const NO_TRADE = 65535;
 const ASK = 0, BID = 1; // AuctionHouse.sol constants — not worth an RPC read
-const bps = (tick) => 100 + 25 * Number(tick);
-const cipher = (egct) => ({
-  c1: [egct.c1.x.toString(), egct.c1.y.toString()],
-  c2: [egct.c2.x.toString(), egct.c2.y.toString()],
-});
 
 const BLOCK_SEC = Number(process.env.BLOCK_SEC || 2); // display estimate for deadlines
 const H = handles(); // no RPC — deployments JSON + ABIs from disk
@@ -37,26 +38,66 @@ const state = {
 // chains are only ever reset together with this process), so each rebuild fetches
 // just (cursor+1 .. head] per filter and appends. All filters commit together —
 // a failed round is discarded whole, so `logs` never holds a mixed-height view.
-const FILTERS = {
-  epochOpened: [H.auction, H.auction.filters.EpochOpened()],
-  epochClosed: [H.auction, H.auction.filters.EpochClosed()],
-  epochPrinted: [H.auction, H.auction.filters.EpochPrinted()],
-  askSubmitted: [H.auction, H.auction.filters.AskSubmitted()],
-  bidSubmitted: [H.auction, H.auction.filters.BidSubmitted()],
-  ratePrinted: [H.oracle, H.oracle.filters.RatePrinted()],
-  noTrade: [H.oracle, H.oracle.filters.NoTrade()],
-  loanCreated: [H.book, H.book.filters.LoanCreated()],
-  funded: [H.book, H.book.filters.Funded()],
-  repaid: [H.book, H.book.filters.Repaid()],
-  bookSeized: [H.book, H.book.filters.Seized()],
-  vaultLocked: [H.vault, H.vault.filters.Locked()],
-  vaultReleased: [H.vault, H.vault.filters.Released()],
-  vaultSeized: [H.vault, H.vault.filters.Seized()],
-  memberAdded: [H.registry, H.registry.filters.MemberAdded()],
-  memberRemoved: [H.registry, H.registry.filters.MemberRemoved()],
-};
+const FILTERS = buildFilters(H);
 const logs = Object.fromEntries(Object.keys(FILTERS).map((k) => [k, []]));
 let cursor = START_BLOCK - 1;
+// one-time-per-record caches (each record is immutable once written on-chain). printCache/sizeCache
+// are declared HERE (not with aggCache below) so the snapshot seed can pre-fill them — those two are
+// the per-record chain reads (getTransaction+prints, loans) that otherwise dominate a cold rebuild.
+const printCache = new Map(); // epoch -> MoniaPrint (cached only once fully decoded)
+const sizeCache = new Map(); // loanId -> cipher(cSize)
+
+// Fast-resume seed: rehydrate the log store + the two hot per-record caches from a snapshot baked
+// into the image, so the first rebuild scans only (snapshotCursor+1 .. head] AND skips the ~3.4k
+// getTransaction/prints/loans reads — a ~7-min cold start becomes seconds. Faithful to what
+// queryFilter/rebuild produce — parseLog rebuilds `.args`/`.fragment` from {topics,data} (the fields
+// it drops are restored alongside); printCache/sizeCache values are baked via the SAME derive.mjs
+// rebuild uses. Any problem (absent file, chain mismatch, decode error) falls back to a full backfill.
+(function seedFromSnapshot() {
+  const path = resolve(dirname(fileURLToPath(import.meta.url)), "snapshot.json");
+  let snap;
+  try {
+    snap = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    console.log("[indexer] no snapshot — full backfill from START_BLOCK");
+    return;
+  }
+  try {
+    if (Number(snap.chainId) !== CHAIN_ID) {
+      console.warn(`[indexer] snapshot chainId ${snap.chainId} != ${CHAIN_ID} — ignoring, full backfill`);
+      return;
+    }
+    let n = 0;
+    for (const key of Object.keys(FILTERS)) {
+      const iface = FILTERS[key][0].interface;
+      for (const l of snap.logs?.[key] || []) {
+        const parsed = iface.parseLog({ topics: l.topics, data: l.data });
+        if (!parsed) continue; // ABI drift — skip this one, rebuild tolerates missing events
+        // Mirror an ethers v6 EventLog for exactly the fields rebuild() reads.
+        logs[key].push({
+          args: parsed.args,
+          fragment: parsed.fragment,
+          blockNumber: l.blockNumber,
+          transactionHash: l.transactionHash,
+          index: l.index,
+        });
+        n++;
+      }
+    }
+    cursor = Number(snap.cursor);
+    // Pre-fill the hot per-record caches so the first rebuild does zero getTransaction/prints/loans.
+    for (const p of snap.prints || []) printCache.set(Number(p.epoch), p);
+    for (const [id, cSize] of Object.entries(snap.sizes || {})) sizeCache.set(id, cSize);
+    console.log(`[indexer] seeded ${n} events + ${printCache.size} prints + ${sizeCache.size} sizes @ block ${cursor} — delta backfill only`);
+  } catch (e) {
+    // Partial seed would leave a mixed-height store; reset to a clean full backfill instead.
+    for (const key of Object.keys(FILTERS)) logs[key].length = 0;
+    printCache.clear();
+    sizeCache.clear();
+    cursor = START_BLOCK - 1;
+    console.warn(`[indexer] snapshot seed failed (${e?.message || e}) — full backfill`);
+  }
+})();
 
 async function syncLogs(head) {
   if (head <= cursor) return;
@@ -72,9 +113,6 @@ async function syncLogs(head) {
   cursor = head;
 }
 
-// one-time-per-record caches (each record is immutable once written on-chain)
-const printCache = new Map(); // epoch -> MoniaPrint (cached only once fully decoded)
-const sizeCache = new Map(); // loanId -> cipher(cSize)
 const aggCache = new Map(); // epoch -> /aggregates response (frozen once Printed)
 let epochLen, tenorBlocks; // constructor immutables — read once
 
@@ -82,7 +120,6 @@ let epochLen, tenorBlocks; // constructor immutables — read once
 // block, so requests always see a complete snapshot (rebuilds never overlap:
 // the loop only schedules the next one after the current one finishes).
 async function rebuild() {
-  const oracleI = H.oracle.interface;
   epochLen ??= Number(await H.auction.epochLength());
   tenorBlocks ??= Number(await H.book.tenorBlocks());
   const tenorMs = tenorBlocks * BLOCK_SEC * 1000;
@@ -120,30 +157,9 @@ async function rebuild() {
     const epoch = Number(ev.args.epoch);
     let print = printCache.get(epoch);
     if (!print) {
-      const rTick = Number(ev.args.rStarTick);
-      const tx = await provider.getTransaction(ev.transactionHash);
-      let depth = [];
-      try {
-        const parsed = oracleI.parseTransaction({ data: tx.data });
-        const d = parsed.args.depth; // (askSum,bidSum)[]
-        depth = d.map((p, tick) => ({
-          tick,
-          bps: bps(tick),
-          supply: p.askSum.toString(),
-          demand: p.bidSum.toString(),
-        }));
-      } catch { /* attested / non-decodable */ }
-      const pr = await H.oracle.prints(epoch);
-      print = {
-        epoch,
-        rStarBps: rTick === NO_TRADE ? null : bps(rTick),
-        aggVolume: pr.aggVolume.toString(),
-        depth,
-        pocd: { verified: true, txHash: ev.transactionHash },
-        printedAt: Number(pr.printedAt) * 1000,
-        stale: false,
-      };
-      if (tx) printCache.set(epoch, print);
+      const { print: p, hasTx } = await decodeRatePrint(H, ev); // shared with the snapshot generator
+      print = p;
+      if (hasTx) printCache.set(epoch, print); // an un-indexed tx is left uncached and retried next rebuild
     }
     prints.set(epoch, print);
     events.push({ type: "RatePrinted", block: ev.blockNumber, txHash: ev.transactionHash, print });
@@ -174,7 +190,7 @@ async function rebuild() {
   const loans = [];
   for (const e of logs.loanCreated) {
     const id = (e.args.loanId ?? 0n).toString();
-    if (!sizeCache.has(id)) sizeCache.set(id, cipher((await H.book.loans(e.args.loanId)).cSize));
+    if (!sizeCache.has(id)) sizeCache.set(id, await loanSizeCipher(H, e.args.loanId)); // shared with the generator
     const deadlineBlock = Number(e.args.deadlineBlock);
     loans.push({
       id,

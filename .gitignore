@@ -38,6 +38,9 @@ contracts/deployments/*.json
 services/**/artifacts/
 *.sqlite
 *.db
+# fast-resume snapshot — a build artifact baked into the image (regenerated per build via
+# scripts/gen_indexer_snapshot.mjs), like contracts/out + circuits/build. Don't churn git with it.
+services/indexer/snapshot.json
 
 # dashboard
 dashboard/dist/
