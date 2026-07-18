@@ -15,6 +15,7 @@ export function buildFilters(H) {
     funded: [H.book, H.book.filters.Funded()],
     repaid: [H.book, H.book.filters.Repaid()],
     bookSeized: [H.book, H.book.filters.Seized()],
+    vaultLockRequested: [H.vault, H.vault.filters.LockRequested()],
     vaultLocked: [H.vault, H.vault.filters.Locked()],
     vaultReleased: [H.vault, H.vault.filters.Released()],
     vaultSeized: [H.vault, H.vault.filters.Seized()],

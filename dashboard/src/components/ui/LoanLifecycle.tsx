@@ -65,9 +65,10 @@ export function LoanLifecycle({ loan, myAddress }: { loan: Loan; myAddress: Addr
     if (loan.status === 'Repaid') return { text: 'Repaid — collateral released', tone: 'up' as const };
     if (seized) return { text: 'Defaulted — collateral seized', tone: 'down' as const };
     if (loan.status === 'Active') return isBorrower ? { text: 'Your move: repay before the deadline', tone: 'you' as const } : { text: 'Funded — awaiting the borrower’s repayment', tone: 'wait' as const };
-    // Pending
-    if (!loan.collateral) return isBorrower ? { text: 'Your move: lock collateral', tone: 'you' as const } : { text: 'Waiting on the borrower to collateralize', tone: 'wait' as const };
-    return !isBorrower ? { text: 'Your move: fund the loan', tone: 'you' as const } : { text: 'Waiting on the lender to fund', tone: 'wait' as const };
+    // Pending — the Control locks the borrower's collateral / funds via the auditor key, so any
+    // member can advance a pending request (the lifecycle, not custody, is the point of the demo).
+    if (!loan.collateral) return { text: 'Needs collateral — lock it to advance this request', tone: 'you' as const };
+    return { text: 'Collateralized — ready to fund', tone: 'you' as const };
   })();
 
   // tenor progress (Active)
@@ -180,11 +181,11 @@ export function LoanLifecycle({ loan, myAddress }: { loan: Loan; myAddress: Addr
         <div className="min-h-[34px] flex items-center flex-shrink-0">
           {progress ? (
             <ProofState progress={progress} />
-          ) : loan.status === 'Pending' && isBorrower && !loan.collateral ? (
+          ) : loan.status === 'Pending' && !loan.collateral ? (
             <button onClick={() => act('coll')} disabled={running} className="btn btn-primary text-xs !py-1.5 inline-flex items-center gap-1.5">
-              <Lock className="w-3.5 h-3.5" /> Lock {collReq != null ? formatUsdc(collReq) : ''} collateral
+              <Lock className="w-3.5 h-3.5" /> Lock collateral{collReq != null ? ` · ${formatUsdc(collReq)}` : ''}
             </button>
-          ) : loan.status === 'Pending' && !isBorrower && loan.collateral ? (
+          ) : loan.status === 'Pending' && loan.collateral ? (
             <button onClick={() => act('fund')} disabled={running} className="btn btn-primary text-xs !py-1.5 inline-flex items-center gap-1.5">
               Fund loan <ArrowRight className="w-3.5 h-3.5" />
             </button>

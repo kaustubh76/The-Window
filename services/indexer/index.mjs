@@ -187,6 +187,14 @@ async function rebuild() {
   const fundedSet = new Set(logs.funded.map((e) => (e.args.loanId ?? 0n).toString()));
   const repaidSet = new Set(logs.repaid.map((e) => (e.args.loanId ?? 0n).toString()));
   const seizedSet = new Set(logs.bookSeized.map((e) => (e.args.loanId ?? 0n).toString()));
+  // Collateral state, so the UI can advance the lifecycle after a lock: LockRequested (borrower's
+  // lock lands instantly) OR Locked (operator-confirmed), minus Released/Seized. The frontend only
+  // tests loan.collateral for truthiness, so a placeholder cipher is enough (real value stays hidden).
+  const collReqSet = new Set(logs.vaultLockRequested.map((e) => (e.args.loanId ?? 0n).toString()));
+  const collLockedSet = new Set(logs.vaultLocked.map((e) => (e.args.loanId ?? 0n).toString()));
+  const collReleasedSet = new Set(logs.vaultReleased.map((e) => (e.args.loanId ?? 0n).toString()));
+  const collSeizedSet = new Set(logs.vaultSeized.map((e) => (e.args.loanId ?? 0n).toString()));
+  const COLL_PLACEHOLDER = { c1: ["0", "0"], c2: ["0", "0"] }; // truthy Ciphertext; amount is never revealed
   const loans = [];
   for (const e of logs.loanCreated) {
     const id = (e.args.loanId ?? 0n).toString();
@@ -199,6 +207,10 @@ async function rebuild() {
       borrower: e.args.borrower.toLowerCase(),
       rateBps: bps(e.args.rateTick),
       size: sizeCache.get(id),
+      collateral:
+        (collReqSet.has(id) || collLockedSet.has(id)) && !collReleasedSet.has(id) && !collSeizedSet.has(id)
+          ? COLL_PLACEHOLDER
+          : undefined,
       deadlineBlock,
       deadlineAt: (nowTs + Math.max(0, deadlineBlock - curBlock) * BLOCK_SEC) * 1000,
       status: seizedSet.has(id) ? "Defaulted" : repaidSet.has(id) ? "Repaid" : fundedSet.has(id) ? "Active" : "Pending",
