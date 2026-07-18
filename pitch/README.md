@@ -11,5 +11,5 @@ npx @marp-team/marp-cli pitch/PITCH.md --pdf --allow-local-files -o pitch/PITCH.
 
 (or `--pptx` for PowerPoint, or open in the VS Code Marp extension to present
 directly). The deck's numbers (epochs, loans, gas) are from the live Fuji
-deployment as of 2026-07-12 — re-check `https://window-indexer.onrender.com/health`
+deployment as of 2026-07-12 — re-check `https://window-indexer-w3pv.onrender.com/health`
 and `/loans` before presenting and bump them if the stack has kept running.

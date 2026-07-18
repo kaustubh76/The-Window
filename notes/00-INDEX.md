@@ -11,8 +11,9 @@ original plan.
 > - On-chain: chunked 4×102-signal PoCD verifier (EIP-170-compliant, 17,892 B), addresses in
 >   `contracts/deployments/43113.json`.
 > - Public app: frontend on **Vercel → https://the-window-five.vercel.app**, `indexer`+`control`
->   on **Render** (`window-indexer`/`window-control`.onrender.com) from a Docker image; the four
->   autonomous drivers run on the local Mac via `demo/run_fuji.sh`. See
+>   on **Render** (`window-indexer-w3pv` / `window-control-opuo`.onrender.com) from a Docker image;
+>   the four autonomous drivers run **24/7 on GitHub Actions** (`.github/workflows/fuji-drivers.yml`),
+>   NOT the local Mac (`demo/run_fuji.sh` is local-dev only). See
 >   [08-hosting-and-deployment](08-hosting-and-deployment.md).
 > - The dashboard now shows **real Fuji transactions with Snowtrace links** (a "Live on-chain
 >   activity" feed + per-event/toast tx links), and the sim-agents randomize bids each epoch.
@@ -28,12 +29,16 @@ original plan.
 | [05-dashboard.md](05-dashboard.md) | Adapter pattern, LiveAdapter method→HTTP-route mapping, MockAdapter/DemoEngine, config & TIME_PROFILES, routes + RoleGate, hooks & stores, env plumbing. |
 | [06-demo-and-ops.md](06-demo-and-ops.md) | run_demo.sh vs run_autonomous.sh vs **run_fuji.sh**, scenario.mjs, verify_backend.mjs, smoke_member.mjs, deploy_local.sh (vanilla Anvil — no code-size hacks), **the live Fuji deployment** (fund_fuji.mjs / deploy_fuji.sh / addresses / timing), Makefile targets, PROFILE plumbing, **full env-var reference**, how to run everything. |
 | [07-decisions-and-gotchas.md](07-decisions-and-gotchas.md) | Every non-obvious decision with Why/Where: auditor-attested funding, vault-operator custody, two ElGamal decrypt conventions, 102-signal-per-chunk coupling, on-chain clearing recompute, NonceManager sharing, the **resolved** chunked-PoCD EIP-170 story, **cloud-hosting gotchas (Render/Docker/Vercel)**, doc-drift list. |
-| [08-hosting-and-deployment.md](08-hosting-and-deployment.md) | **Public cloud deployment**: Vercel (prebuilt static frontend) + Render free-tier `indexer`/`control` web services from a Docker Hub image; live URLs + service IDs, the `Dockerfile`/`.dockerignore` design, Render/Vercel config, the **redeploy runbook**, and the free-tier liveliness caveat (drivers on the Mac). |
+| [08-hosting-and-deployment.md](08-hosting-and-deployment.md) | **Public cloud deployment**: Vercel (prebuilt static frontend) + Render free-tier `indexer`/`control` web services from a Docker Hub image + the four **drivers 24/7 on GitHub Actions**; live URLs + service IDs (incl. the Render account migration), the `Dockerfile`/`.dockerignore` design, Render/Vercel/CI config, and the **redeploy runbook**. |
 | [09-permissioned-l1.md](09-permissioned-l1.md) | **The implemented D7 stretch**: sovereign local L1 `thewindowl1` (43117, Subnet-EVM) with the TxAllowList precompile synced from MemberRegistry by `services/allowlist` — membership IS chain access. Genesis, keeper design, bootstrap ordering, `run_l1.sh`/`verify_l1_allowlist.mjs`, verified-run record. |
 
-The architecture diagram at the repo root (`the_window_architecture.excalidraw`) was regenerated
-2026-07-11 to match the post-Control-API implementation — numbered arrows: R1–R2 read path,
-W1–W4 write path, 1–10 autonomous loan loop, plus on-chain internal and circuit/artifact wiring.
+The architecture diagram at the repo root (`the_window_architecture.excalidraw`) is
+**script-generated** by `scripts/regen_architecture_diagram.py` (reads the hand-authored
+`the_window_architecture.base.excalidraw`, writes the canonical file; validate with
+`scripts/check_diagram_overlaps.py`). It shows: numbered arrows R1–R2 read / W1–W4 write / 1–10
+autonomous loan loop + on-chain internal + circuit/artifact wiring, a **HOSTING & AUTOMATION** band
+(Vercel · Render indexer/control · Docker Hub · GitHub Actions drivers · Fuji), a color legend, and a
+**"why this wins a speedrun"** callout.
 
 ## Other documentation in the repo — freshness map
 

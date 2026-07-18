@@ -5,6 +5,21 @@
 
 **Hackathon:** Avalanche Privacy Hackathon (Team1, India-only) · **Deadline:** July 19, 2026, 3:29 AM IST · **Judging:** value proposition, technical complexity, usage of Avalanche technologies · **Bonus:** eERC running on a permissioned L1 (D7 stretch goal, §12).
 
+---
+
+## Why THE WINDOW wins a speedrun
+
+Speedrun judging rewards **finished-and-true over ambitious-and-broken.** A 70%-finished moonshot reads as broken in a 3-minute demo; a complete build that works in front of you wins. THE WINDOW is complete — and it is *running right now*:
+
+- **Finished & live 24/7, verifiable in one click.** Open **[the-window-five.vercel.app](https://the-window-five.vercel.app)** and watch an autonomous market open epochs, take encrypted bids, and print M-ONIA on Fuji — a live feed of real transactions, each linking straight to Snowtrace. No wallet, no setup, nothing to spin up: the proof is public and on-chain.
+- **A thesis a judge already believes.** Observable borrowing kills lending markets — 2008's discount-window stigma is the textbook case, and SOFR exists precisely to publish a rate without exposing the borrowers. On a transparent chain the machine money market isn't *worse*, it's **impossible**. THE WINDOW makes it possible in ciphertext. That's a value proposition you can state in one sentence and defend for ten minutes.
+- **Hits all three criteria at once.** *Value proposition:* M-ONIA is SOFR for the agent economy — the benchmark rate machines can reference. *Technical complexity:* homomorphic aggregation of encrypted bids + a real Groth16 **proof-of-correct-decryption**, chunked (4×102 signals) to fit EIP-170 and verified on-chain every print. *Avalanche technologies:* eERC encrypted balances end-to-end on Fuji, auditor model and all (+ the permissioned-L1 bonus).
+- **Honest by construction.** No "nobody can see" overclaim — an **accountable, rotatable auditor** decrypts only the aggregates, exactly like SOFR's administrator. Judges reward maturity, and honest privacy claims read as mature.
+
+> **Machines will need to borrow. They will refuse to be watched doing it.**
+
+---
+
 This README is the original build spec (written up-front, executed by an AI coding agent with a human operator "K"). **The build is complete and LIVE** — for documentation of the system *as implemented*, see [`notes/`](notes/00-INDEX.md) (source-verified, kept current); where this README and `notes/` disagree, `notes/` wins.
 
 ---
@@ -13,7 +28,7 @@ This README is the original build spec (written up-front, executed by an AI codi
 
 The full stack is deployed and running autonomously on the real Fuji testnet — real chunked Groth16 PoCD verified on-chain on every M-ONIA print (~4.4M gas), complete loan lifecycles including default → seize, no mocks anywhere in the live path.
 
-**Hosted app:** https://the-window-five.vercel.app (frontend, Vercel) → `window-indexer` / `window-control` .onrender.com (backend, Render) → Fuji. The four autonomous drivers run 24/7 in the cloud (chained GitHub Actions jobs — `.github/workflows/fuji-drivers.yml`, `notes/08`), so the auction advances with no local machine involved; `demo/run_fuji.sh` remains the local-dev driver path.
+**Hosted app:** https://the-window-five.vercel.app (frontend, Vercel) → `window-indexer-w3pv` / `window-control-opuo`.onrender.com (backend, Render) → Fuji. The four autonomous drivers run 24/7 in the cloud (chained GitHub Actions jobs — `.github/workflows/fuji-drivers.yml`, `notes/08`), so the auction advances with no local machine involved; `demo/run_fuji.sh` remains the local-dev driver path.
 
 | Contract | Fuji address |
 |---|---|

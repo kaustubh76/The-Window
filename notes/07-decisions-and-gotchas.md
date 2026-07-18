@@ -368,10 +368,18 @@ for the full setup). All discovered the hard way.
    `dashboard/.env.production` bakes the Render URLs deterministically; uploading source and
    letting Vercel build risks the `.env.production` not being uploaded (it matches `.env.*`).
    The SPA rewrite must **exclude real assets**: `/((?!assets/|window.svg).*) -> /index.html`.
-5. **Free-tier liveliness.** Render free tier has **no always-on workers**, so the four
-   autonomous drivers run on the local Mac (`demo/run_fuji.sh`). The hosted site is always
-   *up* (serves Fuji state), but the auction only *advances* while the Mac drivers run. Free
-   web services also cold-start (~30–60 s) after 15 min idle.
+5. **Drivers run 24/7 on GitHub Actions, not the Mac.** Render free tier has **no always-on
+   workers** (and its 0.1-CPU instances would take minutes per Groth16 proof), so the four
+   autonomous drivers run in CI: `.github/workflows/fuji-drivers.yml` chains hourly runs
+   (`docker run … node services/drivers/index.mjs`), the supervisor self-exits at 5h40m for a
+   clean handoff, and `fuji-drivers-reaper.yml` cancels wedged runs. The repo is **public** so
+   Actions minutes are free and runners are 4-vCPU (laptop-speed proving). `demo/run_fuji.sh` is
+   local-dev only — never run it while the workflow is active (shared actor keys race nonces).
+   Consequence to watch: the driver's Render `/health` **keep-alive burns the shared 750h/mo
+   free-tier cap** — that is what suspended the *first* Render account (services get
+   `billing`-suspended and can't be API-resumed), forcing a redeploy to a fresh account
+   (`window-indexer-w3pv` / `window-control-opuo`). Free web services still cold-start (~30–60 s)
+   after 15 min idle, which the keep-alive hides.
 6. **Agent randomization is deterministic, not RNG.** `agentBids(epoch)` jitters bids via
    `keccak256("window:bid:"+epoch+":"+salt)`, **not** `Math.random` — reproducible for a
    given epoch (and safe if this ever runs where `Math.random` is unavailable).
