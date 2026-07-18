@@ -92,9 +92,26 @@ export class LiveAdapter implements WindowAdapter {
       return { epoch: 0, status: 'Open', profile: this.profile, openedAt: 0, closesAt: 0, epochLenMs: 0, tenorMs: 0, now: 0 };
     }
   }
+  // MULTICAST poller — one self-scheduling fetch loop feeds every subscriber. The clock is
+  // consumed per component instance (every loan row renders a Countdown), so a per-subscriber
+  // setInterval scaled O(rendered rows): hundreds of independent 1s pollers, each firing with
+  // no inflight guard. Any backend slowdown (e.g. a minutes-long server-side solvency proof)
+  // piled those requests up until Chrome refused sockets (net::ERR_INSUFFICIENT_RESOURCES).
+  // One loop, next tick scheduled only after the previous fetch settles, paused while hidden.
+  private clockSubs = new Set<(c: EpochClock) => void>();
+  private clockLoopOn = false;
+  private clockLoop = async () => {
+    if (!this.clockSubs.size) { this.clockLoopOn = false; return; }
+    if (!document.hidden) {
+      const c = await this.getEpochClock(); // never throws (zero-shape fallback)
+      this.clockSubs.forEach((cb) => cb(c));
+    }
+    setTimeout(this.clockLoop, 1000);
+  };
   subscribeClock(cb: (c: EpochClock) => void): Unsubscribe {
-    const id = setInterval(() => { void this.getEpochClock().then(cb); }, 1000);
-    return () => clearInterval(id);
+    this.clockSubs.add(cb);
+    if (!this.clockLoopOn) { this.clockLoopOn = true; void this.clockLoop(); }
+    return () => { this.clockSubs.delete(cb); };
   }
 
   // ---- public reads (indexer; money normalized to bigint) ----
@@ -227,8 +244,14 @@ export class LiveAdapter implements WindowAdapter {
       default: return null; // NoTrade / CollateralLocked / Released — reflected via reads
     }
   }
-  subscribe(cb: (e: WindowEvent) => void): Unsubscribe {
-    const id = setInterval(async () => {
+  // Multicast for the same reasons as the clock — and it also fixes a fairness bug: with a
+  // fetch loop PER subscriber, each advanced the shared lastBlock cursor independently, so
+  // events were split between subscribers instead of every subscriber seeing every event.
+  private eventSubs = new Set<(e: WindowEvent) => void>();
+  private eventLoopOn = false;
+  private eventLoop = async () => {
+    if (!this.eventSubs.size) { this.eventLoopOn = false; return; }
+    if (!document.hidden) {
       try {
         const evs = (await IndexerAPI.events(this.lastBlock)) as any[];
         for (const e of evs) {
@@ -237,11 +260,16 @@ export class LiveAdapter implements WindowAdapter {
           if (!w) continue;
           this.buffer.push(w);
           if (this.buffer.length > 60) this.buffer.shift();
-          cb(w);
+          this.eventSubs.forEach((cb) => cb(w));
         }
-      } catch { /* indexer down */ }
-    }, 2000);
-    return () => clearInterval(id);
+      } catch { /* indexer down — next tick retries */ }
+    }
+    setTimeout(this.eventLoop, 2000);
+  };
+  subscribe(cb: (e: WindowEvent) => void): Unsubscribe {
+    this.eventSubs.add(cb);
+    if (!this.eventLoopOn) { this.eventLoopOn = true; void this.eventLoop(); }
+    return () => { this.eventSubs.delete(cb); };
   }
   recentEvents(): WindowEvent[] { return this.buffer.slice(); }
 }
