@@ -7,7 +7,9 @@ import express from "express";
 import cors from "cors";
 import { provider, handles, queryAll, START_BLOCK, ethers } from "../lib/chain.mjs";
 
-const PORT = Number(process.env.INDEXER_PORT || 8787);
+// Bind to Render's assigned $PORT when present (image-based Render services inject PORT and
+// route to it) — falls back to INDEXER_PORT / 8787 for local + the driver container.
+const PORT = Number(process.env.INDEXER_PORT || process.env.PORT || 8787);
 const NO_TRADE = 65535;
 const ASK = 0, BID = 1; // AuctionHouse.sol constants — not worth an RPC read
 const bps = (tick) => 100 + 25 * Number(tick);
