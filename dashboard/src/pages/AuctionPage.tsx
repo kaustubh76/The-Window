@@ -143,7 +143,7 @@ export default function AuctionPage() {
   const friendlyBidError = (e?: string) => {
     const s = (e || '').toLowerCase();
     if (s.includes('ddafad98') || s.includes('notopen')) return 'The epoch just closed — your bid lands when it reopens (a few seconds).';
-    if (s.includes('8e53a340') || s.includes('alreadybid')) return 'You already have an order in this epoch.';
+    if (s.includes('8e53a340') || s.includes('alreadybid')) return 'You already bid at this rate — pick a different rate.';
     if (s.includes('291fc442') || s.includes('notmember')) return 'Register your encryption key first (Wallet).';
     if (s.includes('bad690b4') || s.includes('badtick')) return 'Pick a valid rate tick.';
     return e || 'Submit failed';
