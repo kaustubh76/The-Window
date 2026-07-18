@@ -7,7 +7,7 @@ import { handles, deployments, provider, ethers } from "./chain.mjs";
 import { ACTORS, AUDITOR } from "./actors.mjs";
 import {
   userFromRaw, genRegistrationProof, processPoseidonEncryption, encryptMessage,
-  genSolvencyProof, genWithdrawProof, decryptEGCT,
+  genSolvencyProof, genWithdrawProof, decryptEGCTAsync,
 } from "../../packages/eerc-node/src/eerc.mjs";
 
 const BUILD = resolve(dirname(fileURLToPath(import.meta.url)), "../../circuits/build");
@@ -19,7 +19,7 @@ const CHAIN_ID = Number(process.env.CHAIN_ID || 31337);
 // ~1-3s). NOTE: use 2**31, NOT 1<<31 — JS bitwise is 32-bit SIGNED, so 1<<31 is negative and
 // Math.sqrt→NaN→BigInt throws. Larger balances degrade gracefully (callers null-out on throw);
 // the correct unbounded path is the Poseidon balancePCT decrypt (notes/07) — TODO.
-const BALANCE_BSGS_MAX = 2 ** 31;
+export const BALANCE_BSGS_MAX = 2 ** 31;
 
 function egct(cipher) {
   return { c1: { x: cipher[0][0], y: cipher[0][1] }, c2: { x: cipher[1][0], y: cipher[1][1] } };
@@ -81,7 +81,7 @@ export async function unwrap(actorName, amount) {
   const user = userFromRaw(a.bjjRaw);
   const bal = await H.eerc.balanceOf(a.address, 1n);
   const flat = [bal.eGCT.c1.x, bal.eGCT.c1.y, bal.eGCT.c2.x, bal.eGCT.c2.y].map((x) => BigInt(x));
-  const senderBalance = decryptEGCT(a.bjjRaw, { c1: { x: flat[0], y: flat[1] }, c2: { x: flat[2], y: flat[3] } }, BALANCE_BSGS_MAX);
+  const senderBalance = await decryptEGCTAsync(a.bjjRaw, { c1: { x: flat[0], y: flat[1] }, c2: { x: flat[2], y: flat[3] } }, BALANCE_BSGS_MAX);
   const eercAuditorPub = userFromRaw(ACTORS.admin.bjjRaw).publicKey; // eERC auditor = admin registered key
   const wp = await genWithdrawProof(user, BigInt(amount), senderBalance, flat, eercAuditorPub);
   const tx = await H.eerc.withdraw(1n, { proofPoints: { a: wp.a, b: wp.b, c: wp.c }, publicSignals: wp.publicSignals }, wp.balancePCT);
@@ -123,7 +123,7 @@ export async function balanceOf(actorName) {
       const bal = await H.eerc.balanceOf(a.address, 1n);
       const eGCT = { c1: { x: bal.eGCT.c1.x, y: bal.eGCT.c1.y }, c2: { x: bal.eGCT.c2.x, y: bal.eGCT.c2.y } };
       eercEncrypted = { c1: [eGCT.c1.x.toString(), eGCT.c1.y.toString()], c2: [eGCT.c2.x.toString(), eGCT.c2.y.toString()] };
-      eercClear = decryptEGCT(a.bjjRaw, eGCT, BALANCE_BSGS_MAX).toString();
+      eercClear = (await decryptEGCTAsync(a.bjjRaw, eGCT, BALANCE_BSGS_MAX)).toString();
     } catch { /* balance not initialised */ }
   }
   return { usdc, registered, eercClear, eercEncrypted };
