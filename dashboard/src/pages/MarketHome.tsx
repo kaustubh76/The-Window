@@ -50,9 +50,11 @@ export default function MarketHome() {
   const hasLiveBids = depth.some((d) => d.supply > 0n || d.demand > 0n);
   const shownDepth = hasLiveBids ? depth : latestMonia?.depth ?? [];
 
-  // Skeleton only during the sub-second adapter init (clock null), never during the honest
-  // pre-first-print period (clock present, rate "—").
-  if (!clock) {
+  // Skeleton during the sub-second adapter init (clock null) AND while the indexer is still cold —
+  // a cold/backfilling indexer serves epochLenMs:0 (no real clock yet), which the adapter would
+  // otherwise paint as a dead "#0 Open, rate —" hero. epochLenMs is >0 for any genuine epoch, so
+  // this never masks the honest pre-first-print period (real Open epoch, rate "—").
+  if (!clock || clock.epochLenMs === 0) {
     return (
       <div className="animate-fade-in">
         <MarketHeroSkeleton />
