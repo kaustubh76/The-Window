@@ -2,7 +2,7 @@
 // the Control API. The ONLY plaintext surface. HARD RULE: never log plaintext sizes.
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { handles, queryAll } from "./chain.mjs";
+import { handles, queryAll, waitTx } from "./chain.mjs";
 import { AUDITOR } from "./actors.mjs";
 import { decryptEGCTDirect, genDepthArrayProof } from "../../packages/eerc-node/src/eerc.mjs";
 
@@ -100,12 +100,14 @@ export async function printEpoch(adminPk, epoch) {
 
   const { proofs } = await genDepthArrayProof(BUILD, AUDITOR.priv, AUDITOR.pub, askAgg, bidAgg, askSum, bidSum);
   const rStar = trade ? crossing : NO_TRADE;
-  const tx = await H.oracle.postPrint(
-    epoch, rStar,
-    depth.map((d) => ({ askSum: d.askSum, bidSum: d.bidSum })),
-    proofs.map((p) => ({ a: p.a, b: p.b, c: p.c }))
+  const { tx, rc } = await waitTx(
+    H.oracle.postPrint(
+      epoch, rStar,
+      depth.map((d) => ({ askSum: d.askSum, bidSum: d.bidSum })),
+      proofs.map((p) => ({ a: p.a, b: p.b, c: p.c }))
+    ),
+    { label: `postPrint e${epoch}`, timeoutMs: 120_000 }, // heavy tx (~4.4M gas); a dropped send must not hang the loop
   );
-  const rc = await tx.wait();
   return { epoch, rStarTick: rStar, rStarBps: trade ? 100 + 25 * crossing : null, matched: matched.toString(), trade, txHash: tx.hash, gasUsed: rc.gasUsed.toString() };
 }
 
@@ -132,20 +134,18 @@ export async function matchEpoch(adminPk, epoch) {
   const firstId = Number(await H.book.nextLoanId());
   const ms = [];
   for (let i = 0; i < n; i++) ms.push({ lender: lenders[i], borrower: borrowers[i], rateTick: r, cSize: zero });
-  await (await H.book.postMatches(epoch, ms)).wait();
+  await waitTx(H.book.postMatches(epoch, ms), { label: `postMatches e${epoch}` });
   return Array.from({ length: n }, (_, i) => firstId + i);
 }
 
 // Auditor-attested confirm/repay (LoanBook onlyAdmin).
 export async function confirmFunding(adminPk, loanId) {
   const H = handles(adminPk);
-  const tx = await H.book.confirmFunding(loanId, "0x" + "00".repeat(32));
-  const rc = await tx.wait();
+  const { tx, rc } = await waitTx(H.book.confirmFunding(loanId, "0x" + "00".repeat(32)), { label: `confirmFunding ${loanId}` });
   return { funded: String(loanId), txHash: tx.hash, gasUsed: rc.gasUsed.toString() };
 }
 export async function repay(adminPk, loanId) {
   const H = handles(adminPk);
-  const tx = await H.book.repay(loanId, "0x" + "00".repeat(32));
-  const rc = await tx.wait();
+  const { tx, rc } = await waitTx(H.book.repay(loanId, "0x" + "00".repeat(32)), { label: `repay ${loanId}` });
   return { repaid: String(loanId), txHash: tx.hash, gasUsed: rc.gasUsed.toString() };
 }

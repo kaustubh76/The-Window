@@ -1,0 +1,44 @@
+# Zombie reaper for fuji-drivers. The drivers self-exit at ~5h40m (DRIVER_MAX_RUNTIME_MS) so a
+# healthy run ends well before GitHub's 350-min timeout. But if a runner wedges and GitHub is slow
+# to reap it, `concurrency: cancel-in-progress: false` makes the next scheduled fuji-drivers run sit
+# pending behind the zombie — and the live market's prints stall until it clears. This lightweight
+# job cancels any fuji-drivers run still in_progress past a hard age ceiling, freeing the queue.
+name: fuji-drivers-reaper
+on:
+  schedule:
+    - cron: "*/20 * * * *" # every 20 min
+  workflow_dispatch: {}
+
+permissions:
+  actions: write # cancel runs
+  contents: read
+
+concurrency:
+  group: fuji-drivers-reaper
+  cancel-in-progress: true
+
+jobs:
+  reap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: cancel fuji-drivers runs older than 6h
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAX_AGE_S: "21600" # 6h — past the drivers' own 5h40m self-exit
+        run: |
+          now=$(date -u +%s)
+          # in_progress + queued: a wedged in_progress run is the blocker; a stuck queued one is noise.
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow fuji-drivers --status in_progress \
+            --json databaseId,startedAt --limit 20 \
+            --jq '.[] | "\(.databaseId) \(.startedAt)"' | while read -r id started; do
+              [ -z "$id" ] && continue
+              start=$(date -u -d "$started" +%s 2>/dev/null || echo 0)
+              age=$(( now - start ))
+              if [ "$start" -gt 0 ] && [ "$age" -gt "$MAX_AGE_S" ]; then
+                echo "reaping zombie run $id (age ${age}s > ${MAX_AGE_S}s, started $started)"
+                gh run cancel "$id" --repo "$GITHUB_REPOSITORY" || echo "cancel failed for $id (may already be ending)"
+              else
+                echo "run $id age ${age}s — within limit, leaving"
+              fi
+            done
