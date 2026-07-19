@@ -50,3 +50,4 @@ dashboard/.vercel/
 
 # os
 .DS_Store
+services/control/dynamic-actors.json

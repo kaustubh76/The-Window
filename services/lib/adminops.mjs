@@ -2,7 +2,7 @@
 // the Control API. The ONLY plaintext surface. HARD RULE: never log plaintext sizes.
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { handles, queryAll, waitTx, ethers } from "./chain.mjs";
+import { handles, queryAll, waitTx, sendTx, ethers } from "./chain.mjs";
 import { AUDITOR } from "./actors.mjs";
 import { decryptEGCTDirect, genDepthArrayProof } from "../../packages/eerc-node/src/eerc.mjs";
 
@@ -136,6 +136,20 @@ export async function matchEpoch(adminPk, epoch) {
   for (let i = 0; i < n; i++) ms.push({ lender: lenders[i], borrower: borrowers[i], rateTick: r, cSize: zero });
   await waitTx(H.book.postMatches(epoch, ms), { label: `postMatches e${epoch}` });
   return Array.from({ length: n }, (_, i) => firstId + i);
+}
+
+// Admin-gated MemberRegistry.addMember — admits a (dynamically-onboarded) address as a real
+// member. Idempotent: returns {already:true} if already a member. joinedEpoch defaults to the
+// current auction epoch; bjjRef binds the member's eERC key reference (used by the L1 allowlist).
+export async function addMember(adminPk, address, bjjRef) {
+  const H = handles(adminPk);
+  if (await H.registry.isMember(address)) return { already: true, address };
+  const epoch = Number(await H.auction.currentEpoch().catch(() => 0n));
+  const { tx, rc } = await sendTx(
+    () => H.registry.addMember(address, epoch, bjjRef || ethers.ZeroHash),
+    { label: `addMember ${address}` },
+  );
+  return { added: address, joinedEpoch: epoch, txHash: tx.hash, gasUsed: rc.gasUsed.toString() };
 }
 
 // Auditor-attested confirm/repay (LoanBook onlyAdmin).

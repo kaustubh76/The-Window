@@ -5,16 +5,39 @@
 import express from "express";
 import cors from "cors";
 import { spawn } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ethers, handles, provider, RPC } from "../lib/chain.mjs";
-import { ACTORS, AUDITOR, actorByAddress, MEMBER_NAMES } from "../lib/actors.mjs";
+import { ACTORS, AUDITOR, actorByAddress, MEMBER_NAMES, addDynamicActor, listDynamic } from "../lib/actors.mjs";
 import { ADMIN_PK, KEEPER_PK, OPERATOR_PK } from "../lib/roles.mjs";
 import * as member from "../lib/memberops.mjs";
 import * as admin from "../lib/adminops.mjs";
+import { fundGas } from "../lib/fund.mjs";
 import { buildBabyTableAsync } from "../../packages/eerc-node/src/eerc.mjs";
 import "dotenv/config";
 
 const PORT = Number(process.env.CONTROL_PORT || process.env.PORT || 8899);
+const CHAIN_ID = Number(process.env.CHAIN_ID || 31337);
+const IS_L1 = CHAIN_ID === 43117;
+
+// Dynamically-onboarded members are custodied EOAs (real users, not the 8 baked personas). We
+// persist their keys so they survive a control restart within an instance (Render's disk is
+// ephemeral across redeploys — acceptable for the demo; a redeploy just re-empties the roster).
+const DYN_FILE = fileURLToPath(new URL("./dynamic-actors.json", import.meta.url));
+const MAX_DYNAMIC = Number(process.env.MAX_DYNAMIC_MEMBERS || 50);
+const ONBOARD_MICRO = BigInt(Number(process.env.ONBOARD_USDC || 1000)) * 1_000_000n;
+function loadDynamicActors() {
+  try {
+    const rows = JSON.parse(readFileSync(DYN_FILE, "utf8"));
+    for (const row of rows) addDynamicActor({ pk: row.pk, role: row.role || "member", name: row.name });
+    if (rows.length) console.log(`[control] reloaded ${rows.length} dynamic member(s)`);
+  } catch { /* none yet */ }
+}
+function persistDynamic() {
+  try { writeFileSync(DYN_FILE, JSON.stringify(listDynamic().map((a) => ({ name: a.name, pk: a.pk, role: a.role, address: a.address })), null, 2)); }
+  catch (e) { console.error("[control] persist dynamic:", e.message); }
+}
+loadDynamicActors();
 const PROVE_WORKER = fileURLToPath(new URL("../lib/prove_worker.mjs", import.meta.url));
 const PRINT_SENTINEL = "__PRINT_RESULT__";
 // Indexer base for the fast admin-decrypt path: hosted URL in prod, localhost in dev.
@@ -81,7 +104,9 @@ async function drainBalances() {
 }
 
 app.get("/health", (_q, r) => r.json({ ok: true }));
-app.get("/actors", (_q, r) => r.json(Object.values(ACTORS).map((a) => ({ name: a.name, address: a.address, role: a.role }))));
+// The persona picker lists the baked demo actors only — dynamically-onboarded members are the
+// user's own identities, not something to impersonate from a dropdown.
+app.get("/actors", (_q, r) => r.json(Object.values(ACTORS).filter((a) => !a.dynamic).map((a) => ({ name: a.name, address: a.address, role: a.role }))));
 
 // ---- permissioned-L1: read-gate token minting + live TxAllowList roles ----
 // The dashboard is keyless, so it can't sign the indexer's read challenge itself. For a
@@ -229,6 +254,56 @@ app.post("/l1/revoke-demo", async (q, r) => {
 app.get("/auditor", (_q, r) => r.json({ ok: true, x: AUDITOR.pub[0].toString(), y: AUDITOR.pub[1].toString() }));
 
 // ---- member ops ----
+// Dynamic onboarding: mint a REAL, unique on-chain member on demand (no hardcoded persona). Control
+// generates a fresh custodied EOA, funds its gas (Core wallet on Fuji, admin's WIN on the L1), admits
+// it to MemberRegistry (admin), eERC-registers it, and seeds a starter balance so it can bid at once.
+// On the permissioned L1 the allowlist keeper then mirrors membership → TxAllowList (chain access).
+// Every subsequent write by this address resolves through resolveActor() exactly like a persona.
+app.post("/member/onboard", async (q, r) => {
+  try {
+    if (listDynamic().length >= MAX_DYNAMIC) throw new Error("member cap reached for this demo instance");
+    const label = (String(q.body?.label || "").trim().slice(0, 40)) || null;
+    const s = t0();
+
+    // 1. fresh EOA → dynamic actor (custodied), persisted so it survives a control restart
+    const actor = addDynamicActor({ pk: ethers.Wallet.createRandom().privateKey, role: "member" });
+    persistDynamic();
+
+    // 2. fund gas (chain-aware) so the new member can send its own txs
+    await fundGas(actor.address);
+
+    // 3. admin admits it to MemberRegistry (onlyMember market ops + read-gate + emits MemberAdded)
+    const ref = ethers.keccak256(ethers.toUtf8Bytes(`the-window:bjj:${actor.address}`));
+    await admin.addMember(ADMIN_PK, actor.address, ref);
+
+    // 4. L1 only: the member CANNOT send any tx until the allowlist keeper mirrors MemberAdded →
+    // TxAllowList (setEnabled). So on the L1 we MUST wait for chain access BEFORE the member signs
+    // its own register/faucet/wrap txs — otherwise the chain rejects them ("non-allow listed
+    // address"). Off the L1 (Fuji/local Anvil) there's no precompile, so skip the wait.
+    let allowlisted = null;
+    if (IS_L1) {
+      const allow = new ethers.Contract(TXALLOWLIST, ALLOWLIST_ABI, provider);
+      for (let i = 0; i < 20 && allowlisted !== true; i++) {
+        if (Number(await allow.readAllowList(actor.address).catch(() => 0)) >= 1) allowlisted = true;
+        else await new Promise((res) => setTimeout(res, 3000));
+      }
+      if (allowlisted !== true) throw new Error("allowlist keeper did not grant the member chain access in time");
+    }
+
+    // 5. eERC key registration (signed as the new member) + 6. starter balance (public + encrypted)
+    await member.registerMember(actor.name);
+    await member.faucet(actor.name, ONBOARD_MICRO);
+    await member.wrap(actor.name, ONBOARD_MICRO);
+
+    ok(r, {
+      address: actor.address,
+      label: label || `member ${actor.address.slice(0, 6)}…${actor.address.slice(-4)}`,
+      roles: ["lender", "borrower"],
+      allowlisted,
+      proofMs: Date.now() - s,
+    });
+  } catch (e) { fail(r, e); }
+});
 app.post("/member/register", async (q, r) => { try { const a = resolveActor(q.body); const s = t0(); ok(r, { ...(await member.registerMember(a)), proofMs: Date.now() - s }); } catch (e) { fail(r, e); } });
 app.post("/member/faucet", async (q, r) => { try { const a = resolveActor(q.body); ok(r, await member.faucet(a, q.body.amount)); } catch (e) { fail(r, e); } });
 app.post("/member/wrap", async (q, r) => { try { const a = resolveActor(q.body); const s = t0(); const d = await member.wrap(a, q.body.amount); ok(r, { ...d, proofMs: Date.now() - s }); } catch (e) { fail(r, e); } });

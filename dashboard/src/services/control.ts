@@ -27,6 +27,28 @@ export async function controlActors(): Promise<ControlActor[]> {
   return Array.isArray(list) ? list.map((a) => ({ ...a, address: a.address.toLowerCase() as Address })) : [];
 }
 
+export interface OnboardResult {
+  address: Address;
+  label: string;
+  roles: Persona[];
+  allowlisted: boolean | null; // L1 TxAllowList enabled (null off the L1)
+}
+
+/**
+ * Onboard a brand-new, dynamic member: Control mints a fresh on-chain identity (real EOA +
+ * eERC key), funds its gas, admits it to MemberRegistry, and seeds a starter balance — so the
+ * user is a REAL participant, not one of the baked personas. Returns the new member's address.
+ */
+export async function controlOnboard(label?: string): Promise<OnboardResult> {
+  const j = await req('/member/onboard', { label });
+  return {
+    address: String(j.address).toLowerCase() as Address,
+    label: String(j.label ?? ''),
+    roles: Array.isArray(j.roles) && j.roles.length ? (j.roles as Persona[]) : ['lender', 'borrower'],
+    allowlisted: j.allowlisted ?? null,
+  };
+}
+
 // ---- permissioned-L1 surface ----
 export interface AllowlistRow {
   address: Address;
@@ -123,6 +145,8 @@ export function rolesForActor(role: string): Persona[] {
       return ['lender'];
     case 'borrower':
       return ['borrower'];
+    case 'member': // dynamically-onboarded real user — can both lend and borrow
+      return ['lender', 'borrower'];
     default:
       return ['public'];
   }
