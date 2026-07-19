@@ -45,12 +45,20 @@ export default function AuctionPage() {
 
   const rStarTick = latestMonia?.rStarBps != null ? bpsToTick(latestMonia.rStarBps) : null;
 
+  // `myBids` from the indexer is the member's WHOLE bid history (every epoch). AlreadyBidHere() and
+  // the "open bids" surface are per-epoch, so scope to the current epoch — otherwise stale bids from
+  // past epochs show as current and their ticks stay locked forever. Reset each epoch via clock.epoch.
+  const epochBids = useMemo(
+    () => (clock ? myBids.filter((b) => b.epoch === clock.epoch) : []),
+    [myBids, clock?.epoch],
+  );
+
   // Ticks this member ALREADY bid on this epoch (this side): re-bidding the same tick reverts with
   // AlreadyBidHere() — and the demo personas double as the autonomous drivers, so several ticks are
   // usually taken already. Use this to seed a FREE default and to block a colliding submit up front.
   const takenTicks = useMemo(
-    () => new Set(myBids.filter((x) => x.side === side).map((x) => bpsToTick(x.bps))),
-    [myBids, side],
+    () => new Set(epochBids.filter((x) => x.side === side).map((x) => bpsToTick(x.bps))),
+    [epochBids, side],
   );
   const firstFreeTick = (preferred: number): number => {
     if (!takenTicks.has(preferred)) return preferred;
@@ -251,7 +259,7 @@ export default function AuctionPage() {
 
         <Card>
           <CardHeader title="My open bids this epoch" />
-          {myBids.length === 0 ? (
+          {epochBids.length === 0 ? (
             <EmptyState
               icon={Inbox}
               title="No orders yet this epoch"
@@ -259,7 +267,7 @@ export default function AuctionPage() {
             />
           ) : (
             <div className="space-y-2">
-              {myBids.slice(0, 6).map((b) => (
+              {[...epochBids].reverse().slice(0, 6).map((b) => (
                 <div key={b.id} className="flex items-center justify-between text-sm py-1.5 border-b border-white/[0.04] last:border-0">
                   <span className={b.side === 'ask' ? 'text-signal-up' : 'text-benchmark-300'}>{b.side === 'ask' ? 'ASK' : 'BID'}</span>
                   <span className="num text-white">{bpsToPctLabel(b.bps)}</span>

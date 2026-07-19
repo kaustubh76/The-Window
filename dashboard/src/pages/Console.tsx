@@ -13,6 +13,7 @@ import { useMarketStore } from '../stores/useMarketStore';
 import { useSessionStore } from '../stores/useSessionStore';
 import { useAdapterStore } from '../stores/useAdapterStore';
 import { useClock } from '../hooks/useClock';
+import { isPendingStale } from '../lib/loans';
 import { formatUsdc } from '../lib/usdc';
 import { bpsToPctLabel } from '../lib/rates';
 import type { Address } from '../lib/adapter/types';
@@ -37,7 +38,10 @@ export default function Console() {
     usePositionsStore.getState().setRevealed(await adapter.decryptOwnBalance(address));
   };
 
-  const activeLoans = myLoans.filter((l) => l.status === 'Active' || l.status === 'Pending');
+  const activeLoans = myLoans.filter((l) => l.status === 'Active' || (l.status === 'Pending' && !isPendingStale(l, clock?.epoch)));
+  // `myBids` is the member's whole bid history; "Open bids" means the CURRENT auction only, so scope
+  // to clock.epoch (past-epoch bids are matched/expired, not open). Newest-first.
+  const openBids = clock ? myBids.filter((b) => b.epoch === clock.epoch) : [];
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
@@ -99,13 +103,13 @@ export default function Console() {
       <div className="grid sm:grid-cols-2 gap-4">
         <Card>
           <CardHeader title="Open bids" right={<Link to="/app/auction" className="text-xs text-benchmark-400 hover:text-benchmark-300">Auction →</Link>} />
-          {myBids.length === 0 ? (
+          {openBids.length === 0 ? (
             <Link to="/app/auction" className="text-sm text-gray-500 hover:text-benchmark-400 inline-flex items-center gap-1.5">
               No open bids — place one <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           ) : (
             <div className="space-y-1.5">
-              {myBids.slice(0, 4).map((b) => (
+              {[...openBids].reverse().slice(0, 4).map((b) => (
                 <div key={b.id} className="flex items-center justify-between text-sm">
                   <span className={b.side === 'ask' ? 'text-signal-up' : 'text-benchmark-300'}>{b.side === 'ask' ? 'ASK' : 'BID'}</span>
                   <span className="num text-white">{bpsToPctLabel(b.bps)}</span>

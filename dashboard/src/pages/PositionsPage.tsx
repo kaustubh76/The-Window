@@ -7,6 +7,8 @@ import { HonestClaimsCallout } from '../components/ui/HonestClaimsCallout';
 import { usePositionsStore } from '../stores/usePositionsStore';
 import { useSessionStore } from '../stores/useSessionStore';
 import { useUiStore } from '../stores/useUiStore';
+import { useClock } from '../hooks/useClock';
+import { isPendingStale } from '../lib/loans';
 import { timeProfile } from '../config';
 import type { Address } from '../lib/adapter/types';
 
@@ -14,12 +16,16 @@ export default function PositionsPage() {
   const address = useSessionStore((s) => s.address) as Address;
   const { myLoans } = usePositionsStore();
   const profile = useUiStore((s) => s.profile);
+  const epoch = useClock()?.epoch;
   const tenorCopy =
     profile === 'DEMO'
       ? `a 6-hour tenor compressed to ${timeProfile(profile).tenorLabel}`
       : `a ${timeProfile(profile).tenorLabel} tenor`;
 
-  const live = myLoans.filter((l) => l.status === 'Pending' || l.status === 'Active');
+  // Pending loans that were matched but never collateralized/funded before their window closed are
+  // abandoned — surface them separately so "Open" only holds genuinely actionable requests.
+  const stalePending = myLoans.filter((l) => isPendingStale(l, epoch));
+  const live = myLoans.filter((l) => l.status === 'Active' || (l.status === 'Pending' && !isPendingStale(l, epoch)));
   const settled = myLoans.filter((l) => l.status === 'Repaid' || l.status === 'Defaulted');
   const active = myLoans.filter((l) => l.status === 'Active').length;
   const repaid = myLoans.filter((l) => l.status === 'Repaid').length;
@@ -67,6 +73,20 @@ export default function PositionsPage() {
                   <LoanCard key={l.id} loan={l} myAddress={address} />
                 ))}
               </div>
+            </div>
+          )}
+          {stalePending.length > 0 && (
+            <div>
+              <div className="text-xs uppercase tracking-wider text-gray-500 mb-1 mt-2">Expired · never funded</div>
+              <p className="text-[11px] text-gray-600 mb-3">Matched but not collateralized and funded before the window closed — no longer actionable.</p>
+              <div className="grid sm:grid-cols-2 gap-3 opacity-70">
+                {stalePending.slice(0, 6).map((l) => (
+                  <LoanCard key={l.id} loan={l} myAddress={address} stale />
+                ))}
+              </div>
+              {stalePending.length > 6 && (
+                <p className="text-[11px] text-gray-600 mt-2">+{stalePending.length - 6} more expired request{stalePending.length - 6 === 1 ? '' : 's'}</p>
+              )}
             </div>
           )}
         </>
