@@ -56,6 +56,24 @@ export function actorByAddress(addr) {
   return BY_ADDRESS[String(addr).toLowerCase()] || null;
 }
 
+// ---- Dynamic members (real users onboarded at runtime, not the 8 baked personas) ----
+// A dynamic actor is a freshly-generated EOA that Control custodies exactly like a persona:
+// same shape ({name, pk, address, bjjRaw, role}), so every member op keyed by ACTORS[name]
+// (register/wrap/bid/lock/balance) works unchanged. `role: "member"` grants both sides in the UI.
+// Names are the address itself (guaranteed unique, and self-describing in logs).
+export function addDynamicActor({ pk, role = "member", name }) {
+  const address = new ethers.Wallet(pk).address.toLowerCase();
+  const key = name || address;
+  const actor = { name: key, pk, address, bjjRaw: bjjRaw(address), role, dynamic: true };
+  ACTORS[key] = actor;
+  BY_ADDRESS[address] = actor;
+  return actor;
+}
+
+export function listDynamic() {
+  return Object.values(ACTORS).filter((a) => a.dynamic);
+}
+
 // The bidding agents (all registered members). tick/size are BASE values; the live
 // stack jitters them per epoch via agentBids() so r*, matched volume, and defaults vary.
 export const AGENTS = [

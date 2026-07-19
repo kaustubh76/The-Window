@@ -62,21 +62,39 @@ export function abi(name, sol = name) {
   return JSON.parse(readFileSync(`${CROOT}/out/${sol}.sol/${name}.json`, "utf8")).abi;
 }
 
-// Every service awaits tx.wait() after each send (no pipelining), so NonceManager's
-// cached delta buys nothing — but it DOES desync whenever anything else moves the
-// account's nonce: another process sharing the key (agents vs admin vs control all
-// sign for the same actors), or a send that failed after the counter bumped. That
-// stranded the market twice (silent NoTrade streak; admin stuck NONCE_EXPIRED on one
-// epoch for hours). Re-sync from the chain's pending count before every send.
+// Nonce assignment that survives BOTH failure modes we've hit:
+//  (a) cross-process desync — another process sharing the key (agents/admin/control sign for the
+//      same actors) moves the account's nonce out from under us (stranded the market twice:
+//      NoTrade streak; admin stuck NONCE_EXPIRED for hours);
+//  (b) rapid same-process sequential sends on an instant-mining chain (Anvil / subnet-EVM), where
+//      re-reading the "pending" count right after a mine returns a STALE value, so two back-to-back
+//      sends (e.g. onboarding's register→faucet→wrap) grab the same nonce → NONCE_EXPIRED.
+// Fix: take max(chain "latest" count, local high-water mark). "latest" re-syncs to external moves;
+// the high-water mark guarantees strictly-increasing nonces across rapid local sends the chain
+// hasn't caught up to yet. On a send failure we drop the mark so the next send re-syncs from chain.
 class FreshNonceManager extends ethers.NonceManager {
+  #next = null;
   async sendTransaction(tx) {
-    this.reset();
-    return super.sendTransaction(tx);
+    const mined = await this.provider.getTransactionCount(await this.getAddress(), "latest");
+    const nonce = this.#next == null ? mined : Math.max(this.#next, mined);
+    this.#next = nonce + 1;
+    try {
+      return await this.signer.sendTransaction({ ...tx, nonce });
+    } catch (e) {
+      this.#next = null; // desync/failure → re-sync from chain next time
+      throw e;
+    }
   }
 }
 
+// Cache one signer per key so every call site for an EOA (handles(), the gas funder, ad-hoc sends)
+// shares ONE FreshNonceManager. Two separate managers for the same account each re-read the pending
+// nonce and can hand out the same value back-to-back (e.g. fund → addMember both as ADMIN) → a
+// NONCE_EXPIRED collision. A single shared instance serializes that account's sends.
+const _walletCache = new Map();
 export function wallet(pk) {
-  return new FreshNonceManager(new ethers.Wallet(pk, provider));
+  if (!_walletCache.has(pk)) _walletCache.set(pk, new FreshNonceManager(new ethers.Wallet(pk, provider)));
+  return _walletCache.get(pk);
 }
 
 // Bound every send. ethers' tx.wait() polls indefinitely, and eth_sendRawTransaction can hang on a
@@ -103,6 +121,23 @@ export async function waitTx(txOrPromise, { timeoutMs = 90_000, confirmations = 
     return await Promise.race([settle, timeout]);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// waitTx + retry on a nonce collision (NONCE_EXPIRED / "nonce too low"). The admin key is shared
+// across processes (admin daemon + control) and, on instant-mining chains, two back-to-back sends
+// from one account can momentarily read the same pending nonce. FreshNonceManager re-syncs from the
+// chain on each send, so a short pause + retry lands the next free nonce. Mirrors control's sendAdmin.
+export async function sendTx(makeCall, { tries = 5, label = "" } = {}) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await waitTx(makeCall(), { label });
+    } catch (e) {
+      const s = String(e?.code || e?.shortMessage || e?.message || "");
+      const nonceRace = /NONCE_EXPIRED|nonce too low|already been used|replacement/i.test(s);
+      if (!nonceRace || i === tries - 1) throw e;
+      await new Promise((r) => setTimeout(r, 1500 + 500 * i));
+    }
   }
 }
 

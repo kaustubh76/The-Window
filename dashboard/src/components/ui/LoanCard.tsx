@@ -1,4 +1,4 @@
-import { Lock, Coins, Banknote, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Lock, Coins, Banknote, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
 import { Card } from './Card';
 import { StatusPill } from './StatusPill';
 import { EncryptedValue } from './EncryptedValue';
@@ -14,7 +14,7 @@ import { requiredCollateral } from '../../lib/usdc';
 import { HAIRCUT_BPS, timeProfile } from '../../config';
 import type { Address, Loan } from '../../lib/adapter/types';
 
-export function LoanCard({ loan, myAddress }: { loan: Loan; myAddress: Address }) {
+export function LoanCard({ loan, myAddress, stale = false }: { loan: Loan; myAddress: Address; stale?: boolean }) {
   const adapter = useAdapterStore((s) => s.adapter);
   const profile = useUiStore((s) => s.profile);
   const { run, progress, running } = useTx();
@@ -75,7 +75,11 @@ export function LoanCard({ loan, myAddress }: { loan: Loan; myAddress: Address }
 
       {/* actions */}
       <div className="min-h-[34px] flex items-center">
-        {progress ? (
+        {stale ? (
+          <span className="text-xs text-gray-500 flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5" /> Expired · never funded
+          </span>
+        ) : progress ? (
           <ProofState progress={progress} />
         ) : loan.status === 'Pending' && isBorrower && !loan.collateral ? (
           <button onClick={() => act('coll')} disabled={running} className="btn btn-primary text-xs !py-1.5 flex items-center gap-1.5">

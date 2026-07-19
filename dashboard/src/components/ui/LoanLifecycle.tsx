@@ -14,6 +14,7 @@ import { useTx } from '../../hooks/useTx';
 import { useToast } from '../../contexts/ToastContext';
 import { bpsToPctLabel } from '../../lib/rates';
 import { requiredCollateral, formatUsdc, microToNumber } from '../../lib/usdc';
+import { isPendingStale } from '../../lib/loans';
 import { HAIRCUT_BPS, HAIRCUT_PCT, timeProfile } from '../../config';
 import type { Address, Loan } from '../../lib/adapter/types';
 
@@ -30,6 +31,7 @@ export function LoanLifecycle({ loan, myAddress }: { loan: Loan; myAddress: Addr
   const { run, progress, running } = useTx();
   const toast = useToast();
   const isBorrower = loan.borrower.toLowerCase() === myAddress.toLowerCase();
+  const stale = isPendingStale(loan, clock?.epoch); // matched but never funded before the window closed
 
   const principal = loan.size.clear ?? null; // plaintext only when entitled
   const collReq = principal != null ? requiredCollateral(principal, HAIRCUT_BPS) : null;
@@ -75,6 +77,7 @@ export function LoanLifecycle({ loan, myAddress }: { loan: Loan; myAddress: Addr
     if (loan.status === 'Repaid') return { text: 'Repaid — collateral released', tone: 'up' as const };
     if (seized) return { text: 'Defaulted — collateral seized', tone: 'down' as const };
     if (loan.status === 'Active') return { text: 'Active — repay to settle', tone: 'you' as const };
+    if (stale) return { text: 'Expired — funding window closed', tone: 'stale' as const };
     // Pending — the Control locks the borrower's collateral / funds via the auditor key, so any
     // member can advance a pending request (the lifecycle, not custody, is the point of the demo).
     if (!loan.collateral) return { text: 'Needs collateral — lock it to advance this request', tone: 'you' as const };
@@ -189,7 +192,11 @@ export function LoanLifecycle({ loan, myAddress }: { loan: Loan; myAddress: Addr
           {move.text}
         </span>
         <div className="min-h-[34px] flex items-center flex-shrink-0">
-          {progress ? (
+          {stale ? (
+            <span className="text-xs text-gray-500 inline-flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5" /> Request expired
+            </span>
+          ) : progress ? (
             <ProofState progress={progress} />
           ) : loan.status === 'Pending' && !loan.collateral ? (
             <button onClick={() => act('coll')} disabled={running} className="btn btn-primary text-xs !py-1.5 inline-flex items-center gap-1.5">
