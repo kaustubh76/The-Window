@@ -252,10 +252,8 @@ packages/eerc-node/src/register_all.mjs:33-48.
   `@zk-kit/baby-jubjub` + `maci-crypto` + `poseidon-lite`, the same libraries the
   protocol uses, so its proofs are accepted by the deployed contracts (eerc.mjs:1-3).
   All proof-bearing writes run here, invoked by the services and the Control API.
-- **Browser**: the dashboard does **not** generate eERC proofs. Its mock adapter has a
-  browser ElGamal port (`dashboard/src/lib/adapter/mock/elgamal.browser.ts`,
-  circomlibjs-based) so the Explorer shows genuine ciphertexts, and in live mode all
-  writes go through the **Control API** (`VITE_CONTROL_URL`, config.ts:53-55), where
+- **Browser**: the dashboard does **not** generate eERC proofs. All
+  writes go through the **Control API** (`VITE_CONTROL_URL`), where
   the server-side implementation does the proving.
 
 **Why**: heavy Groth16 proving and auditor-key handling belong server-side ("the
@@ -267,8 +265,8 @@ v1.0.2 (React hooks), and `dashboard/.env.example` still mentions
 "`@avalabs/eerc-sdk` writes" — but `dashboard/package.json` has **no such dependency**;
 the SDK plan was superseded by the Control API (commit 15b508e). See the drift list.
 
-**Where**: packages/eerc-node/src/eerc.mjs, dashboard/src/lib/adapter/mock/elgamal.browser.ts,
-dashboard/src/config.ts:53-55, services/control/index.mjs:1-4.
+**Where**: packages/eerc-node/src/eerc.mjs,
+dashboard/src/config.ts, services/control/index.mjs:1-4.
 
 ## Indexer has no persistence — by design
 
@@ -398,8 +396,8 @@ rewrite it, read it with these caveats):**
    `packages/eerc-node/src/eerc.mjs`.
 2. **spike/NOTES.md:101 claims the dashboard uses `@avalabs/eerc-sdk` v1.0.2** —
    `dashboard/package.json` has no such dependency; the browser never got the SDK.
-   Live writes go via the Control API (commit 15b508e); browser-side crypto is the
-   circomlibjs ElGamal port in the mock adapter.
+   Live writes go via the Control API (commit 15b508e); the browser performs no
+   eERC crypto (the mock adapter's ElGamal port was removed in `feat/live-only-no-mock`).
 3. **spike/NOTES.md + spike/GATE.md still describe the 372-signal monolithic PoCD and
    the cast pre-deploy** (over-EIP-170 verifier, `anvil --code-size-limit`,
    `DEPTH_ARRAY_VERIFIER_ADDR`, the "split into bid/ask proofs" deferred plan,

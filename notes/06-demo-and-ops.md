@@ -367,8 +367,8 @@ Service-tuning vars not in `.env.example` but read by code:
 
 ### Dashboard `VITE_*` vars
 
-Auto-written to `dashboard/.env` by `register_all.mjs:50-74` after every deploy:
-`VITE_ADAPTER=live`, `VITE_PROFILE=DEMO`, `VITE_CHAIN_ID`, `VITE_RPC_LOCAL`,
+Auto-written to `dashboard/.env` by `register_all.mjs` after every deploy:
+`VITE_PROFILE=DEMO`, `VITE_CHAIN_ID`, `VITE_RPC_LOCAL`,
 **`VITE_RPC_FUJI` (only when `CHAIN_ID === 43113` — the dashboard live path reads it
 for that chain id, register_all.mjs:56-57)**, `VITE_INDEXER_URL`, `VITE_CONTROL_URL`,
 `VITE_TESTUSDC_ADDR`, `VITE_EERC_ADDR`, `VITE_REGISTRAR_ADDR`,
@@ -377,9 +377,9 @@ for that chain id, register_all.mjs:56-57)**, `VITE_INDEXER_URL`, `VITE_CONTROL_
 `VITE_KEEPER_ADDR`.
 
 `dashboard/.env.example` additionally documents `VITE_RPC_FUJI` and
-`VITE_SNOWTRACE_URL`; defaults for everything live in `dashboard/src/config.ts:49-72`.
-`VITE_ADAPTER=mock` (the default in config.ts:9) runs the zero-backend in-browser
-simulation — see `05-dashboard.md`.
+`VITE_SNOWTRACE_URL`; defaults for everything live in `dashboard/src/config.ts`.
+The dashboard is live-only (the mock adapter was removed in `feat/live-only-no-mock`) —
+see `05-dashboard.md`.
 
 ## How to run everything
 

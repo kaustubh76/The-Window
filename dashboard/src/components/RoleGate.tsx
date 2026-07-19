@@ -33,7 +33,7 @@ export function RoleGate({ need, children }: { need: Need; children: ReactNode }
       <Prompt
         icon={Lock}
         title="Connect to continue"
-        body="Connect a wallet — or step into a simulated persona — to access your console, wallet, and positions."
+        body="Join as a real member — or step in as a demo actor — to access your console, wallet, and positions."
         showConnect
       />
     );

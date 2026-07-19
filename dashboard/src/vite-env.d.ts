@@ -1,7 +1,6 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_ADAPTER?: 'mock' | 'live';
   readonly VITE_PROFILE?: 'DEMO' | 'PROD';
   readonly VITE_CHAIN_ID?: string;
   readonly VITE_RPC_FUJI?: string;

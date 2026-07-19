@@ -1,16 +1,17 @@
 import type { WindowAdapter } from '../WindowAdapter';
 import type {
   Address, Balances, Bps, Ciphertext, DepthPoint, EpochClock, EpochId, Loan, LoanId,
-  LoanStatus, MemberInfo, MoniaPrint, MyBid, OnProof, Profile, SessionState, Side,
+  LoanStatus, MemberInfo, MoniaPrint, MyBid, OnProof, Profile, Side,
   TickIndex, TxResult, Unsubscribe, UsdcMicro, WindowEvent,
 } from '../types';
 import { PROFILE, INDEXER_URL, CONTROL_URL } from '../../../config';
 import { IndexerAPI } from '../../../services/indexer';
 
-// Live adapter — the dashboard as a full control + view surface for the disclosed
-// SIMULATED members. Public reads come from the indexer; every WRITE is performed
-// server-side by the Control API (services/control) using the proven eerc-node flows
-// (real proofs), so the browser holds no keys and needs no eERC SDK / circuit artifacts.
+// Live adapter — the dashboard as a full control + view surface for the market's members:
+// the disclosed scripted agents AND dynamically onboarded real users. Public reads come
+// from the indexer; every WRITE is performed server-side by the Control API
+// (services/control) using the proven eerc-node flows (real proofs), so the browser
+// holds no keys and needs no eERC SDK / circuit artifacts.
 const LOCKED: Ciphertext = { c1: ['0', '1'], c2: ['0', '1'] };
 
 // The indexer/control serialize on-chain uint256 as decimal STRINGS. Normalize to bigint
@@ -69,16 +70,30 @@ async function ctrl(path: string, body?: unknown, method: 'POST' | 'GET' = 'POST
 export class LiveAdapter implements WindowAdapter {
   readonly mode = 'live' as const;
   private profile: Profile = PROFILE;
-  private actor: Address | null = null; // the selected/connected member address
   private buffer: WindowEvent[] = []; // recent mapped firehose events (for the Explorer feed)
   private lastBlock = 0;
 
   async init(): Promise<void> {
     try { await fetch(`${INDEXER_URL}/health`); } catch { /* graceful-empty until up */ }
+    void this.simAddrs(); // warm the scripted-actor roster for the sync event mapper
   }
 
-  /** Called by useEercBridge to reflect the connected wallet / selected persona. */
-  setActor(a: Address | null) { this.actor = a ? (a.toLowerCase() as Address) : null; }
+  // Scripted-actor roster — control /actors lists only the baked demo agents (dynamically
+  // onboarded members are real users), so it is the honest source for the `simulated`
+  // disclosure flag. Lazy + cached; while unknown (null) we defer to the indexer's own
+  // flag, which fail-honestly over-flags rather than presenting a scripted actor as real.
+  private simSet: Set<string> | null = null;
+  private simSetPromise: Promise<Set<string> | null> | null = null;
+  private simAddrs(): Promise<Set<string> | null> {
+    if (this.simSet) return Promise.resolve(this.simSet);
+    if (!this.simSetPromise) {
+      this.simSetPromise = ctrl('/actors', undefined, 'GET')
+        .then((r: { address: string }[]) => (this.simSet = new Set(r.map((a) => String(a.address).toLowerCase()))))
+        .catch(() => null)
+        .finally(() => { this.simSetPromise = null; });
+    }
+    return this.simSetPromise;
+  }
 
   getProfile() { return this.profile; }
   setProfile(p: Profile) { this.profile = p; }
@@ -120,7 +135,14 @@ export class LiveAdapter implements WindowAdapter {
     try { return ((await IndexerAPI.moniaHistory(limit)) as any[]).map(mapPrint).filter(Boolean) as MoniaPrint[]; } catch { return []; }
   }
   async getDepthCurve(epoch?: EpochId): Promise<DepthPoint[]> { try { return mapDepth(await IndexerAPI.depth(epoch)); } catch { return []; } }
-  async getMembers(): Promise<MemberInfo[]> { try { return (await IndexerAPI.members()) as MemberInfo[]; } catch { return []; } }
+  async getMembers(): Promise<MemberInfo[]> {
+    try {
+      const ms = (await IndexerAPI.members()) as MemberInfo[];
+      const sim = await this.simAddrs();
+      // Narrow the indexer's flag with the scripted roster: onboarded real users are NOT sim.
+      return sim ? ms.map((m) => ({ ...m, simulated: m.simulated && sim.has(m.address.toLowerCase()) })) : ms;
+    } catch { return []; }
+  }
   async getLoanBook(filter?: { status?: LoanStatus }): Promise<Loan[]> {
     try {
       const l = ((await IndexerAPI.loans()) as any[]).map((x) => ({ ...x, status: x.status === 'None' ? 'Pending' : x.status })) as Loan[];
@@ -132,11 +154,6 @@ export class LiveAdapter implements WindowAdapter {
   }
 
   // ---- session-scoped ----
-  async getSession(): Promise<SessionState> {
-    if (!this.actor) return { address: null, registered: false, persona: ['public'] };
-    const bal = await ctrl(`/member/balance/${this.actor}`, undefined, 'GET').catch(() => ({ registered: false }));
-    return { address: this.actor, registered: !!bal.registered, persona: ['public', 'lender', 'borrower'] };
-  }
   async getBalances(a: Address): Promise<Balances> {
     const b = await ctrl(`/member/balance/${a}`, undefined, 'GET').catch(() => ({ usdc: '0', registered: false, eercClear: null, eercEncrypted: null }));
     return {
@@ -207,7 +224,16 @@ export class LiveAdapter implements WindowAdapter {
     onP?.({ phase: 'proving', label: 'admin proving 37-tick PoCD…' });
     const r = await ctrl(`/admin/print/${e}`, {});
     onP?.({ phase: 'done', label: 'M-ONIA printed', ms: r.proofMs });
-    // synthesize from the Control response + decrypted depth (avoid racing the 3s indexer rebuild)
+    // Prefer the indexer's decoded ON-CHAIN print (real printedAt / depth / pocd from the
+    // postPrint calldata + oracle state). The 3s rebuild lags the tx, so poll briefly with
+    // the cache bypassed; if it doesn't land in time, fall back to a shape synthesized from
+    // the Control response — still factual: postPrint verifies the Groth16 proof on-chain
+    // or the tx would have reverted.
+    for (let i = 0; i < 6; i++) {
+      await new Promise((res) => setTimeout(res, 3000));
+      const p = mapPrint(await IndexerAPI.latestMoniaFresh().catch(() => null));
+      if (p && Number(p.epoch) === Number(e)) return { ok: true, proofMs: r.proofMs, txHash: r.txHash, print: p };
+    }
     let depth: DepthPoint[] = [];
     try { depth = await this.adminDecryptAggregates(e); } catch { /* attested */ }
     const print: MoniaPrint = {
@@ -232,7 +258,13 @@ export class LiveAdapter implements WindowAdapter {
     const meta = { txHash: e.txHash as (`0x${string}` | undefined), block: e.block as (number | undefined) };
     switch (e.type) {
       case 'BidSubmitted':
-        return { type: 'BidSubmitted', side: (e.side === 'ask' ? 'ask' : 'bid') as Side, tick: Number(e.tick), by: e.who, simulated: true, cipher: LOCKED, ...meta };
+        // simulated: indexer-provided when available; else classify by the scripted roster
+        // (unknown roster → true, fail-honest: never presents a scripted actor as real).
+        return {
+          type: 'BidSubmitted', side: (e.side === 'ask' ? 'ask' : 'bid') as Side, tick: Number(e.tick), by: e.who,
+          simulated: e.simulated ?? (this.simSet ? this.simSet.has(String(e.who).toLowerCase()) : true),
+          cipher: LOCKED, ...meta,
+        };
       case 'EpochOpened': return { type: 'EpochOpened', epoch: Number(e.epoch ?? 0), ...meta };
       case 'EpochClosed': return { type: 'EpochClosed', epoch: Number(e.epoch ?? 0), ...meta };
       case 'RatePrinted': { const p = mapPrint(e.print); return p ? { type: 'RatePrinted', print: p, ...meta } : null; }

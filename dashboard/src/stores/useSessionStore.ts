@@ -10,12 +10,6 @@ export function personaFor(addr: Address): Persona[] {
   return ['lender', 'borrower'];
 }
 
-// Tell the mock adapter which address is "active" (for getSession/writes).
-function pushActive(addr: Address | null) {
-  const a = useAdapterStore.getState().adapter as unknown as { setActiveAddress?: (x: Address | null) => void } | null;
-  a?.setActiveAddress?.(addr);
-}
-
 interface SessionState {
   address: Address | null;
   source: 'wallet' | 'persona' | null;
@@ -36,13 +30,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   label: undefined,
 
   connect: (address, source, persona, label) => {
-    pushActive(address);
     set({ address, source, persona: persona ?? personaFor(address), label, registered: false });
     void get().refreshRegistration();
   },
 
   disconnect: () => {
-    pushActive(null);
     set({ address: null, source: null, persona: ['public'], registered: false, label: undefined });
   },
 

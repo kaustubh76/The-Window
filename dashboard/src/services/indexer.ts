@@ -77,6 +77,9 @@ export async function getJson<T>(path: string, useCache = true, opts: { retries?
 // Endpoint map the indexer is expected to serve (see services/indexer spec).
 export const IndexerAPI = {
   latestMonia: () => getJson('/monia/latest'),
+  // cache-bypassed variant for the post-print read-back: the 4s TTL cache would race
+  // the indexer's 3s rebuild and hand back the pre-print state
+  latestMoniaFresh: () => getJson('/monia/latest', false),
   moniaHistory: (limit = 40) => getJson(`/monia/history?limit=${limit}`),
   depth: (epoch?: number) => getJson(`/depth${epoch != null ? `?epoch=${epoch}` : ''}`),
   loans: () => getJson('/loans'),

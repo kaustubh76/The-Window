@@ -14,7 +14,6 @@ import type {
   OnProof,
   Profile,
   Side,
-  SessionState,
   TickIndex,
   TxResult,
   UsdcMicro,
@@ -22,10 +21,10 @@ import type {
   WindowEvent,
 } from './types';
 
-// The single interface every page talks to. Mock and live implementations are
-// interchangeable — pages never know which is behind it.
+// The single interface every page talks to. LiveAdapter is the sole implementation —
+// the interface remains the type contract and the documented eERC unit boundary.
 export interface WindowAdapter {
-  readonly mode: 'mock' | 'live';
+  readonly mode: 'live';
   init(): Promise<void>;
 
   // clock / profile
@@ -43,7 +42,6 @@ export interface WindowAdapter {
   getRawCiphertexts(epoch: EpochId): Promise<{ side: Side; tick: TickIndex; agg: import('./types').Ciphertext }[]>;
 
   // session-scoped reads
-  getSession(): Promise<SessionState>;
   getBalances(a: Address): Promise<Balances>;
   decryptOwnBalance(a: Address): Promise<UsdcMicro>; // client-side, owner entitlement only
   getMyBids(a: Address): Promise<MyBid[]>;
@@ -72,21 +70,6 @@ export interface WindowAdapter {
 
   // firehose
   subscribe(cb: (e: WindowEvent) => void): Unsubscribe;
-  /** Recent event log snapshot (reflects scrub/replay state, unlike the live-only subscribe). */
+  /** Recent event log snapshot (buffered from the indexer poll loop). */
   recentEvents(): WindowEvent[];
-}
-
-// Optional demo controls exposed only by the mock adapter (see MockAdapter).
-export interface DemoControls {
-  play(): void;
-  pause(): void;
-  setSpeed(mult: number): void;
-  seek(ms: number): void;
-  reseed(seed: number): void;
-  loadScenario(name: string): void;
-  stepEpoch(): void;
-}
-
-export function hasDemoControls(a: WindowAdapter): a is WindowAdapter & DemoControls {
-  return a.mode === 'mock' && typeof (a as unknown as DemoControls).play === 'function';
 }

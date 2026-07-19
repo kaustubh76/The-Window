@@ -3,15 +3,16 @@
 React 18 + Vite + TypeScript SPA: wagmi/viem for wallet, zustand for state,
 @tanstack/react-query available, recharts for charts, tailwind for styling
 (`dashboard/package.json`). It is a **view + control surface** over the off-chain
-services (`04-services.md`): in live mode all reads come from the indexer (:8787) and
+services (`04-services.md`): all reads come from the indexer (:8787) and
 all writes go through the Control API (:8899) — the browser holds **no private keys and
-no circuit artifacts**.
+no circuit artifacts**. The app is **live-only**: the former in-browser mock adapter
+was removed (`feat/live-only-no-mock`), and a CI guard in `honestClaims.test.ts`
+fails the build if any mock reference returns to `src/`.
 
 ## Contents
 
 - [Adapter pattern](#adapter-pattern)
 - [LiveAdapter — method → HTTP route map](#liveadapter--method--http-route-map)
-- [MockAdapter — deterministic zero-backend demo](#mockadapter--deterministic-zero-backend-demo)
 - [Config (`src/config.ts`)](#config-srcconfigts)
 - [Routes and pages](#routes-and-pages)
 - [Hooks](#hooks)
@@ -23,32 +24,30 @@ no circuit artifacts**.
 
 ## Adapter pattern
 
-Every page talks to one frozen interface and never knows which implementation is behind it.
+Every page talks to one frozen interface; `LiveAdapter` is its sole implementation —
+the interface remains the type contract and the documented eERC unit boundary.
 
 - `src/lib/adapter/WindowAdapter.ts` — the interface: clock/profile, public reads
   (`getLatestMonia`, `getMoniaHistory`, `getDepthCurve`, `getMembers`, `getLoanBook`,
-  `getRawCiphertexts`), session reads (`getSession`, `getBalances`,
+  `getRawCiphertexts`), session reads (`getBalances`,
   `decryptOwnBalance`, `getMyBids`, `getMyLoans`), member writes (`register`, `faucet`,
   `wrap`, `unwrap`, `submitAsk`, `submitBid`, `lockCollateral`, `fund`, `repay`), keeper
   (`closeEpoch`, `seize`), admin (`adminDecryptAggregates`, `adminComputeClearing`,
   `adminPostPrint`, `adminPostMatches`), and a `subscribe` firehose + `recentEvents()`
-  snapshot (WindowAdapter.ts:27-77). A separate `DemoControls` interface
-  (play/pause/setSpeed/seek/reseed/loadScenario/stepEpoch) is exposed only by the mock;
-  `hasDemoControls()` type-guards it (WindowAdapter.ts:80-92).
+  snapshot.
 - `src/lib/adapter/types.ts` — the shared DTO types (Address, Ciphertext, MoniaPrint,
   DepthPoint, Loan, MyBid, EpochClock, WindowEvent, …). The indexer explicitly shapes its
   responses to these types (services/indexer/index.mjs:1-2).
-- `src/lib/adapter/index.ts` — the single entry point. `getAdapter()` lazy-imports the
-  adapter selected by `ADAPTER_MODE` (from `VITE_ADAPTER`, `mock` | `live`, default
-  `mock`) and **memoizes it behind a promise guard** so concurrent `init()` calls never
-  double-construct or double-load WASM (index.ts:4-35). `__resetAdapter()` is test-only.
+- `src/lib/adapter/index.ts` — the single entry point. `getAdapter()` constructs the
+  `LiveAdapter` and **memoizes it behind a promise guard** so concurrent `init()` calls
+  never double-construct.
 
 ## LiveAdapter — method → HTTP route map
 
 `src/lib/adapter/live/LiveAdapter.ts`. Reads go through **IndexerAPI**
 (`src/services/indexer.ts`): a REST client with `fetchWithRetry` (2 retries, 8 s
 timeout, backoff on 429; indexer.ts:15-35) and a **4-second TTL cache** capped at 200
-entries (indexer.ts:11-13, 37-50) against `INDEXER_URL` (:8787 in local live mode).
+entries (indexer.ts:11-13, 37-50) against `INDEXER_URL` (:8787 in local dev).
 Cache is bypassed for `/epoch/clock`, `/events`, `/bids`, `/health` (indexer.ts:59-63).
 Every write is a `fetch` to the Control API at `CONTROL_URL` (:8899) via the `ctrl()`
 helper, which throws unless the response has `ok: true` (LiveAdapter.ts:16-25). The
@@ -87,55 +86,28 @@ Verified method → route map:
 | `adminPostMatches(e)` | `POST {CONTROL}/admin/matches/:epoch` then re-reads `/loans` | 183-186 |
 | `subscribe(cb)` | polls `GET {INDEXER}/events?since=` every 2 s; `mapEvent` maps `BidSubmitted`, `EpochOpened`, `EpochClosed`, `RatePrinted`, `LoanCreated`→`MatchesPosted` (real `epoch`, joined by the indexer from the loan record), `Funded`, `Repaid`, `Seized`/`CollateralSeized`→`LoanSeized` | 189-221 |
 
-Other notes: `setActor(a)` is called by `useEercBridge` to reflect the connected
-wallet/persona (LiveAdapter.ts:71); all reads degrade gracefully (empty/null) when
+Other notes: all reads degrade gracefully (empty/null) when
 services are down; the private `tx()` helper surfaces `{phase: 'proving', label:
 'proving (server-side)…'}` through `onProof` and returns `proofMs` + `gasUsed` (the
-Control API returns the receipt's gas stringified; `tx()` coerces it to number)
-(LiveAdapter.ts:133-144). `/keeper/open` exists on the Control API but no LiveAdapter
+Control API returns the receipt's gas stringified; `tx()` coerces it to number).
+`/keeper/open` exists on the Control API but no LiveAdapter
 method calls it (the keeper daemon opens epochs). LiveAdapter also implements
 `auditorKey()` (async — fetches the PUBLIC auditor key from control `GET /auditor`) so
-the Diagnostics card renders in live mode; MockAdapter's remains synchronous and
-`Diagnostics.tsx` handles both via `Promise.resolve(...)`. (The dead pre-Control-API
-leftover `src/lib/adapter/live/contracts.ts` was deleted in the submission-hardening
-pass.)
-
-## MockAdapter — deterministic zero-backend demo
-
-`src/lib/adapter/mock/` — the default (`VITE_ADAPTER` unset ⇒ mock). A fully client-side,
-deterministic simulation:
-
-- **`MockAdapter.ts`** — implements `WindowAdapter` + `DemoControls`. Drives a
-  `DemoEngine` on a 120 ms real-time tick (MockAdapter.ts:60-69) and simulates honest
-  proof latency phases ("building witness… → generating proof… → verifying…") via
-  `simulateProof` (MockAdapter.ts:29-47).
-- **`engine.ts`** — `DemoEngine`, "the deterministic heart of the simulation": a seeded,
-  virtual-clock event timeline (agents bid → close → M-ONIA print with PoCD → matches →
-  loans borrow→repay→release, occasional default→seize). Everything is a pure function of
-  `(seed, scenario)` — no `Date.now`/`Math.random` in domain logic — so scrub/replay is
-  byte-identical (engine.ts:1-7). Note its **sim timings differ from config**: DEMO
-  epochs are 22 s with a 30 s tenor for watchability (engine.ts:45-48).
-- **`elgamal.browser.ts`** — **real ElGamal over BabyJubJub in the browser** (circomlibjs
-  port of `packages/eerc-node/src/elgamal.mjs`): keypair, encrypt, homomorphic
-  `addCipher`, `decryptToPoint`, and BSGS discrete-log recovery — so the Explorer shows
-  genuine `c1/c2` ciphertexts and genuinely aggregated sums with no backend
-  (elgamal.browser.ts:1-19).
-- **`scenarios.ts`** — four seeded presets for the demo control bar: `happy-path`,
-  `default-and-seize`, `no-trade`, `rate-spike` (scenarios.ts:11-36).
-- **`strategies.ts`** — the README §12 agent archetypes as pure seeded functions
-  (yield-lender, opportunistic-lender, desperate-borrower, opportunistic-borrower,
-  noise), tuned so supply/demand realistically cross (strategies.ts:19-60).
-- **`members.ts`** — fixed roster of five SIMULATED members with deterministic fake
-  addresses (`fakeAddress(label)`) + simulated admin/keeper personas (members.ts:29-49).
-- **`rng.ts`** — mulberry32 PRNG (`Rng`) + `epochSeed(base, epoch)`; also emits
-  deterministic bigint scalars for ElGamal randomness (rng.ts:4-40).
+the Diagnostics card renders. The `simulated` disclosure flag is narrowed with the
+scripted-actor roster from control `GET /actors` (lazy-cached `simAddrs()`), so
+dynamically onboarded real members are never badged `sim`; while the roster is unknown
+the indexer's own flag is used as-is (fail-honest: over-flags). After `adminPostPrint`,
+the adapter polls the indexer (cache-bypassed `/monia/latest`, ~6×3 s) for the decoded
+ON-CHAIN print and only falls back to a Control-response-synthesized shape if the
+rebuild hasn't landed. (The dead pre-Control-API leftover
+`src/lib/adapter/live/contracts.ts` was deleted in the submission-hardening pass; the
+in-browser MockAdapter/DemoEngine tree was removed in `feat/live-only-no-mock`.)
 
 ## Config (`src/config.ts`)
 
-- `ADAPTER_MODE` from `VITE_ADAPTER` (default `mock`); `PROFILE` from `VITE_PROFILE`
-  (default `DEMO`) (config.ts:9-10).
-- **`TIME_PROFILES`** (config.ts:20-23): DEMO `epochLenMs: 60_000` / `tenorMs: 300_000`
-  (labels "60s" / "5m"); PROD `3_600_000` / `21_600_000` ("1h" / "6h"). All durations must
+- `PROFILE` from `VITE_PROFILE` (default `DEMO`) (config.ts).
+- **`TIME_PROFILES`**: DEMO `epochLenMs: 22_000` / `tenorMs: 30_000`
+  (labels "22s" / "30s"); PROD `3_600_000` / `21_600_000` ("1h" / "6h"). All durations must
   read from a profile — "never hardcode durations elsewhere" (config.ts:2).
 - Fixed protocol params (config.ts:29-37): `USDC_DECIMALS = 6`,
   **`HAIRCUT_BPS = 12_000` (120% collateral)**, rate band 1.00%–10.00% annualized →
@@ -182,19 +154,19 @@ All in `src/hooks/`, one-liners verified against source headers:
 - **`useClock`** — subscribes to the adapter's virtual clock; all countdowns derive from `clock.now`, never `Date.now()`, so DEMO scrubbing and PROD block-time both work.
 - **`useMarketData`** — wires the adapter into `useMarketStore`: clock ticks + refresh on market events (`RatePrinted`, `EpochClosed`, `MatchesPosted`, `LoanFunded`, `LoanRepaid`, `LoanSeized`) and a poll.
 - **`useMyData`** — hydrates the connected address's balances/bids/loans into `usePositionsStore`, refreshing on clock ticks and a poll.
-- **`useEercBridge`** — live-mode only: reflects the connected wagmi wallet / selected persona into `LiveAdapter.setActor` (the browser needs no eERC SDK; writes are server-side).
+- **`useEercBridge`** — reflects the connected wallet / selected persona into the read-gate auth (`setReadActor`) and refreshes registration once the adapter is up (the browser needs no eERC SDK; writes are server-side and carry the address explicitly).
 - **`useTx`** — wraps any proof-bearing adapter write, threading `onProof` into a phase state machine with honest copy ("building witness… → generating proof… → verified ✓").
-- **`useEventFeed`** — scrub-safe feed that resyncs from `adapter.recentEvents()` each tick (reflects backward scrubbing in mock mode).
+- **`useEventFeed`** — feed that resyncs from `adapter.recentEvents()` each tick.
 - **`useGlobalEvents`** — global toast notifications for key events, mounted once in Layout; deduped by epoch/loan id and throttled.
-- **`useWalletSync`** — syncs the wagmi connection into `useSessionStore` (`source='wallet'`), coexisting with mock PersonaSwitcher selections (`source='persona'`).
-- (Also present, not adapter-related: `useAnimatedNumber`, `useCopyToClipboard`, `useKeyboardShortcuts`.)
+- **`useWalletSync`** — reflects a real browser-wallet connection into `useSessionStore` (`source='wallet'`) IF one is ever wired up; the app configures no wagmi connector today, so it is a no-op alongside persona/custodial sessions (`source='persona'`).
+- (Also present, not adapter-related: `useAnimatedNumber`, `useCopyToClipboard`.)
 
 ## On-chain tx surfacing + live tx feed (`76a52d5`)
 
 Real Fuji transactions are now shown throughout the UI with clickable Snowtrace links:
 
 - **`components/ui/TxLink.tsx`** — a compact `↗ tx` link (`EXPLORER_TX(hash, SNOWTRACE_URL)`);
-  renders nothing when there's no hash (mock events / missing tx).
+  renders nothing when there's no hash (missing tx).
 - **`components/ui/LiveTxFeed.tsx`** — a prominent "Live on-chain activity" card mounted on
   `MarketHome` (home page). Reuses `useEventFeed()`, filters to events that carry a `txHash`,
   shows a one-line label per event + a `TxLink`. This is the main "liveliness" surface.
@@ -219,7 +191,6 @@ All in `src/stores/`:
 - **`useMarketStore`** — public market state: clock, latest M-ONIA, history, depth, members, loan book.
 - **`usePositionsStore`** — session positions: balances, `revealed` (self-decrypted eERC balance), my bids, my loans.
 - **`useSessionStore`** — connected address, source (wallet/persona), persona array (admin/keeper gating via `ADMIN_ADDR`/`KEEPER_ADDR`), registered flag.
-- **`useDemoStore`** — mock-only demo controls (play/pause/speed/seek/reseed/scenario/stepEpoch), proxied through `hasDemoControls`.
 - **`useUiStore`** — DEMO/PROD profile toggle backing the ProfileSwitch.
 
 ## Env: auto-written `.env`
@@ -229,7 +200,6 @@ All in `src/stores/`:
 `06-demo-and-ops.md`). It writes:
 
 ```
-VITE_ADAPTER=live
 VITE_PROFILE=DEMO
 VITE_CHAIN_ID=<chainId>            # 31337 locally
 VITE_RPC_LOCAL=<rpc>
@@ -240,8 +210,8 @@ VITE_AUCTION_HOUSE_ADDR / VITE_MONIA_ORACLE_ADDR / VITE_COLLATERAL_VAULT_ADDR / 
 VITE_ADMIN_ADDR / VITE_KEEPER_ADDR
 ```
 
-So after a fresh local deploy the dashboard boots straight into live mode with correct
-addresses and persona gating — don't hand-edit `.env`, it gets overwritten.
+So after a fresh local deploy the dashboard boots straight against the deployed stack
+with correct addresses and persona gating — don't hand-edit `.env`, it gets overwritten.
 
 **`dashboard/.env.production`** (gitignored, hand-maintained) is the **Vercel build** env —
 Vite loads it in `build` mode. Same `VITE_*` keys, but `VITE_INDEXER_URL`/`VITE_CONTROL_URL`

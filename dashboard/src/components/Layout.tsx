@@ -1,6 +1,5 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import Header from './Header';
-import DemoControlBar from './DemoControlBar';
 import { CommandPalette } from './CommandPalette';
 import { PersonaPicker } from './PersonaPicker';
 import { EpochProgress } from './ui/EpochProgress';
@@ -51,7 +50,6 @@ export default function Layout() {
         >
           <Outlet />
         </main>
-        <DemoControlBar />
         <CommandPalette />
         <PersonaPicker />
         <footer className="relative border-t border-white/[0.04] mt-8">

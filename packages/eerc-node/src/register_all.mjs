@@ -49,7 +49,6 @@ try {
 
 // 3. dashboard/.env
 const denv = [
-  "VITE_ADAPTER=live",
   "VITE_PROFILE=DEMO",
   `VITE_CHAIN_ID=${CHAIN_ID}`,
   `VITE_RPC_LOCAL=${RPC}`,
@@ -70,6 +69,6 @@ const denv = [
   "",
 ].join("\n");
 writeFileSync(`${ROOT}/dashboard/.env`, denv);
-console.log("wrote dashboard/.env (VITE_ADAPTER=live, control + indexer URLs)");
+console.log("wrote dashboard/.env (control + indexer URLs, contract addresses)");
 console.log("register_all done.");
 process.exit(0); // ethers provider polling keeps the event loop alive otherwise
