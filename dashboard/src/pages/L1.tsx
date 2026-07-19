@@ -71,8 +71,12 @@ const GATE_PROBE_URL = READ_GATED ? INDEXER_URL : GATED_INDEXER_URL;
 async function probeL1Read(asMember: string | null): Promise<ProbeResult> {
   let headers: Record<string, string> = {};
   if (asMember) {
-    const tok = await mintReadToken(asMember);
+    // Control (free tier) can be cold on the first hit — one retry so a member never falls through
+    // to a header-less request that would 403 and look like a broken panel.
+    let tok = await mintReadToken(asMember);
+    if (!tok) { await new Promise((r) => setTimeout(r, 1500)); tok = await mintReadToken(asMember); }
     if (tok) headers = { 'x-window-address': tok.address, 'x-window-sig': tok.sig };
+    else return { status: 0 }; // couldn't mint a member token yet → pending, let the caller retry
   }
   try {
     const res = await fetch(`${GATE_PROBE_URL}/members`, { headers });
@@ -101,11 +105,13 @@ export default function L1() {
   const [actors, setActors] = useState<ControlActor[]>([]);
   const [info, setInfo] = useState<L1Info | null>(null);
 
-  // read-gate demonstrator state
+  // read-gate demonstrator state. `undefined` = not yet resolved (waiting for a member to sign as —
+  // we must NOT probe as an outsider yet, or the card loads showing a spurious 403); `null` = the user
+  // explicitly chose Outsider; a string = viewing as that member.
   const memberActors = useMemo(() => actors.filter((a) => a.role === 'lender' || a.role === 'borrower'), [actors]);
-  const [asMember, setAsMember] = useState<string | null>(null); // null = outsider
+  const [asMember, setAsMember] = useState<string | null | undefined>(undefined);
   const [probe, setProbe] = useState<ProbeResult>(null);
-  const [probing, setProbing] = useState(false);
+  const [probing, setProbing] = useState(true); // starts probing (resolving a member) — never a load-time 403
 
   useEffect(() => {
     let alive = true;
@@ -115,12 +121,23 @@ export default function L1() {
       l1Info().then((i) => { if (alive) setInfo(i); }).catch(() => {});
       l1Allowlist().then((r) => { if (alive) { setRoles(r.rows); setPrecompile(r.precompile); } }).catch(() => {});
     }
-    controlActors().then((a) => {
+    controlActors().then(async (a) => {
       if (!alive) return;
       setActors(a);
       const first = a.find((x) => x.role === 'lender' || x.role === 'borrower');
-      setAsMember(first ? first.address : null);
-    }).catch(() => {});
+      if (first) { setAsMember(first.address); return; }
+      // No actors from Control (cold/unreachable) — fall back to a real member from the public
+      // indexer so the demonstrator still opens on the MEMBER (200) view, never stuck pending.
+      try {
+        const mem = (await (await fetch(`${FUJI_INDEXER_URL}/members`)).json()) as { address: string }[];
+        if (alive) setAsMember(Array.isArray(mem) && mem[0]?.address ? mem[0].address : null);
+      } catch { if (alive) setAsMember(null); }
+    }).catch(async () => {
+      try {
+        const mem = (await (await fetch(`${FUJI_INDEXER_URL}/members`)).json()) as { address: string }[];
+        if (alive) setAsMember(Array.isArray(mem) && mem[0]?.address ? mem[0].address : null);
+      } catch { if (alive) setAsMember(null); }
+    });
     return () => { alive = false; };
   }, [liveL1]);
 
@@ -128,10 +145,21 @@ export default function L1() {
     // Probe live whenever a gated read surface exists: the app's own indexer on the L1
     // build, or the READ_GATE=1 twin on public Fuji. Without either, probing an ungated
     // indexer would 200 for everyone and falsely undercut the thesis — show the design.
-    if (!GATE_PROBE_URL) return;
+    // Skip while asMember is undefined (still resolving) so the card never fires a spurious
+    // outsider probe on load; auto-retry a cold twin/control (status 0) instead of dead-ending.
+    if (!GATE_PROBE_URL || asMember === undefined) return;
     let alive = true;
+    let tries = 0;
     setProbing(true);
-    probeL1Read(asMember).then((r) => { if (alive) { setProbe(r); setProbing(false); } });
+    const run = () => {
+      probeL1Read(asMember).then((r) => {
+        if (!alive) return;
+        if (r?.status === 0 && tries < 3) { tries += 1; setTimeout(run, 2500); return; }
+        setProbe(r);
+        setProbing(false);
+      });
+    };
+    run();
     return () => { alive = false; };
   }, [asMember]);
 
@@ -343,14 +371,14 @@ export default function L1() {
           right={
             <div className="flex items-center gap-1 bg-white/[0.03] rounded-lg p-0.5 border border-white/[0.05]">
               <button
-                onClick={() => setAsMember(memberActors[0]?.address ?? null)}
-                className={clsx('px-3 py-1.5 rounded-md text-xs font-medium transition-colors', asMember ? 'bg-signal-up/15 text-signal-up' : 'text-gray-400 hover:text-white')}
+                onClick={() => setAsMember(memberActors[0]?.address ?? (typeof asMember === 'string' ? asMember : null))}
+                className={clsx('px-3 py-1.5 rounded-md text-xs font-medium transition-colors', typeof asMember === 'string' ? 'bg-signal-up/15 text-signal-up' : 'text-gray-400 hover:text-white')}
               >
                 Member
               </button>
               <button
                 onClick={() => setAsMember(null)}
-                className={clsx('px-3 py-1.5 rounded-md text-xs font-medium transition-colors', !asMember ? 'bg-signal-down/15 text-signal-down' : 'text-gray-400 hover:text-white')}
+                className={clsx('px-3 py-1.5 rounded-md text-xs font-medium transition-colors', asMember === null ? 'bg-signal-down/15 text-signal-down' : 'text-gray-400 hover:text-white')}
               >
                 Outsider
               </button>
@@ -361,10 +389,12 @@ export default function L1() {
           <div className="glass p-4">
             <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
               <KeyRound className="w-3.5 h-3.5" />
-              {asMember ? (
+              {typeof asMember === 'string' ? (
                 <>viewing as member <span className="num text-gray-300">{shortAddr(asMember)}</span> · Control mints a member-signed token</>
-              ) : (
+              ) : asMember === null ? (
                 <>viewing as a non-member · no token</>
+              ) : (
+                <>resolving a member to sign as…</>
               )}
             </div>
             <div className="num text-xs text-gray-500">GET {GATE_PROBE_URL || INDEXER_URL}/members</div>
