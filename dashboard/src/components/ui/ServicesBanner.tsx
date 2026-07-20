@@ -1,16 +1,16 @@
 import { AlertTriangle, Loader2 } from 'lucide-react';
-import { ADAPTER_MODE, CONFIG_WARNINGS } from '../../config';
+import { CONFIG_WARNINGS } from '../../config';
 import { useMarketStore } from '../../stores/useMarketStore';
 
-// Live mode only: makes "backend not up yet" read as such instead of a silent epoch-#0
-// dashboard. Reads the SHARED market-store clock (not an independent useClock subscription,
+// Makes "backend not up yet" read as such instead of a silent epoch-#0 dashboard.
+// Reads the SHARED market-store clock (not an independent useClock subscription,
 // which can race to a transient fallback) so it never false-alarms while real data is live.
 export function ServicesBanner() {
   const clock = useMarketStore((s) => s.clock);
   const history = useMarketStore((s) => s.history);
   const loanBook = useMarketStore((s) => s.loanBook);
 
-  // Build-time misconfiguration (e.g. live build with no VITE_CONTROL_URL) — surface it
+  // Build-time misconfiguration (e.g. a hosted build with no VITE_CONTROL_URL) — surface it
   // unconditionally, before any clock/data gating, so a broken hosted deploy isn't silent.
   if (CONFIG_WARNINGS.length) {
     return (
@@ -23,7 +23,7 @@ export function ServicesBanner() {
     );
   }
 
-  if (ADAPTER_MODE !== 'live' || !clock) return null;
+  if (!clock) return null;
 
   // A reachable indexer always returns a real block timestamp (now > 0).
   const unreachable = clock.now === 0;

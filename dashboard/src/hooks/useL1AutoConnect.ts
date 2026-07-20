@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { ADAPTER_MODE, READ_GATED } from '../config';
+import { READ_GATED } from '../config';
 import { controlActors, rolesForActor } from '../services/control';
 import { useSessionStore } from '../stores/useSessionStore';
 
@@ -11,7 +11,7 @@ import { useSessionStore } from '../stores/useSessionStore';
 export function useL1AutoConnect() {
   const done = useRef(false);
   useEffect(() => {
-    if (done.current || ADAPTER_MODE !== 'live' || !READ_GATED) return;
+    if (done.current || !READ_GATED) return;
     if (useSessionStore.getState().address) return; // already connected (wallet/persona)
     done.current = true;
     controlActors()

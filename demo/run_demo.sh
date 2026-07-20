@@ -48,6 +48,6 @@ echo "== [5/5] run scripted full-epoch scenario (REAL proofs; ~2 min) =="
 node "$ROOT/demo/scenario.mjs"
 
 echo ""
-echo "Demo done. Start the dashboard:  cd dashboard && npm run dev   (VITE_ADAPTER=live)"
+echo "Demo done. Start the dashboard:  cd dashboard && npm run dev"
 echo "Indexer:  curl http://127.0.0.1:${INDEXER_PORT}/monia/latest"
 echo "For the unattended-live story, run the services:  keeper / agents / admin (see services/)."

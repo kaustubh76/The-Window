@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { FlaskConical, Cpu, Gauge, KeyRound, Server } from 'lucide-react';
+import { Cpu, Gauge, KeyRound, Server } from 'lucide-react';
 import { Card, CardHeader } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { useMarketStore } from '../stores/useMarketStore';
 import { useAdapterStore } from '../stores/useAdapterStore';
 import { useUiStore } from '../stores/useUiStore';
-import { ADAPTER_MODE, timeProfile, CHAIN_LABEL, IS_L1, RPC_FUJI, RPC_LOCAL, INDEXER_URL, ADDRESSES } from '../config';
+import { timeProfile, CHAIN_LABEL, IS_L1, RPC_FUJI, RPC_LOCAL, INDEXER_URL, ADDRESSES } from '../config';
 
 const GATE = [
   { k: 'Homomorphic accumulate', v: '≈ 13k gas', note: 'per-tick Σ Enc(size) via BabyJubJub._add' },
@@ -21,7 +21,7 @@ export default function Diagnostics() {
   const [auditor, setAuditor] = useState<[string, string] | null>(null);
 
   useEffect(() => {
-    // mock returns the pair synchronously; live returns a promise (control /auditor)
+    // the auditor PUBLIC key, served by control /auditor
     const a = adapter as unknown as { auditorKey?: () => [string, string] | Promise<[string, string] | null> } | null;
     if (!a?.auditorKey) return;
     let alive = true;
@@ -38,19 +38,8 @@ export default function Diagnostics() {
         <p className="text-gray-400 text-sm mt-1">Adapter, chain, and gate telemetry.</p>
       </div>
 
-      {ADAPTER_MODE === 'mock' && (
-        <div className="glass p-4 flex items-start gap-3 border-benchmark-500/15">
-          <FlaskConical className="w-5 h-5 text-benchmark-400 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-gray-400">
-            Running the <span className="text-benchmark-300 font-semibold">in-browser simulation</span> (DemoEngine). All members are
-            simulated; ciphertexts are genuine ElGamal-over-BabyJubJub. No chain calls are made — flip <code className="num text-cipher-300">VITE_ADAPTER=live</code> to
-            target deployed Fuji contracts.
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatTile label="Adapter" value={ADAPTER_MODE} accent={ADAPTER_MODE === 'mock' ? 'gold' : 'cipher'} icon={Server} />
+        <StatTile label="Adapter" value="live" accent="cipher" icon={Server} />
         <StatTile label="Profile" value={profile} icon={Gauge} sub={`epoch ${tp.epochLabel} · tenor ${tp.tenorLabel}`} />
         <StatTile label="Epochs printed" value={history.length} accent="gold" icon={Cpu} />
         <StatTile label="Loans cycled" value={loanBook.length} accent="cipher" icon={Cpu} sub={`${members.length} members`} />
@@ -90,7 +79,7 @@ export default function Diagnostics() {
           {addrRows.map(([k, v]) => (
             <div key={k} className="flex items-center justify-between py-1 border-b border-white/[0.03] last:border-0">
               <span className="text-sm text-gray-400">{k}</span>
-              <span className="num text-xs text-gray-500">{v || (ADAPTER_MODE === 'mock' ? 'simulated' : 'not deployed')}</span>
+              <span className="num text-xs text-gray-500">{v || 'not deployed'}</span>
             </div>
           ))}
         </div>

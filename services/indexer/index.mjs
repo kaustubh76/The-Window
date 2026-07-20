@@ -20,6 +20,11 @@ const PORT = Number(process.env.INDEXER_PORT || process.env.PORT || 8787);
 const ASK = 0, BID = 1; // AuctionHouse.sol constants — not worth an RPC read
 
 const BLOCK_SEC = Number(process.env.BLOCK_SEC || 2); // display estimate for deadlines
+// Scripted-agent roster (comma-separated addresses) for the `simulated` disclosure flag.
+// Addresses only — never actor keys (the read-only indexer must not hold PKs). Unset →
+// fail-honest: flag EVERY member simulated rather than present a scripted actor as real.
+const SIM_SET = new Set((process.env.SIM_ADDRS ?? "").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean));
+const isSim = (who) => (SIM_SET.size ? SIM_SET.has(who) : true);
 const H = handles(); // no RPC — deployments JSON + ABIs from disk
 const state = {
   epochs: new Map(), // epoch -> {status, openedAt, closesAt}
@@ -253,7 +258,7 @@ async function rebuild() {
       // also surface each bid in the global firehose (encrypted amount stays hidden)
       events.push({
         type: "BidSubmitted", block: e.blockNumber, txHash: e.transactionHash,
-        epoch: Number(e.args.epoch), side, tick: Number(e.args.tick), who,
+        epoch: Number(e.args.epoch), side, tick: Number(e.args.tick), who, simulated: isSim(who),
       });
     }
   }
@@ -272,7 +277,7 @@ async function rebuild() {
     const who = ev.args.who.toLowerCase();
     memberMap.set(who, {
       address: who,
-      simulated: true, // all demo members are simulated
+      simulated: isSim(who), // scripted agents only (all members when SIM_ADDRS is unset)
       active: activeSet.has(who),
       joinedEpoch: Number(ev.args.joinedEpoch),
       roles: ["public"],

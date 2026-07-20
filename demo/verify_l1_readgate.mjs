@@ -9,13 +9,15 @@
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { INTRUDER_PK } from "./l1-fixtures.mjs";
 const require = createRequire(resolve(dirname(fileURLToPath(import.meta.url)), "../services/package.json"));
 const { Wallet } = require("ethers");
 
 const URL = process.env.READGATE_URL || process.env.INDEXER_L1_URL || "http://127.0.0.1:8788";
-// Anvil #3 = lender1 — a MemberRegistry member. Anvil #8 = the never-member intruder.
-const MEMBER_PK = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6";
-const INTRUDER_PK = "0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97";
+// lender1 = a real MemberRegistry member (sign as its REAL key); INTRUDER_PK = a purpose-generated
+// never-member (demo/l1-fixtures.mjs). A member's signed read is admitted (200); the intruder's is 403.
+const MEMBER_PK = process.env.LENDER1_PK;
+if (!MEMBER_PK) { console.error("LENDER1_PK required (real member key) — source the root .env"); process.exit(1); }
 
 // Must match services/indexer/index.mjs readChallenge(): window-read:<floor(now/30s)>
 const challenge = () => `window-read:${Math.floor(Date.now() / 30000)}`;

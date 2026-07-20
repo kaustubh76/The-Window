@@ -71,8 +71,12 @@ const GATE_PROBE_URL = READ_GATED ? INDEXER_URL : GATED_INDEXER_URL;
 async function probeL1Read(asMember: string | null): Promise<ProbeResult> {
   let headers: Record<string, string> = {};
   if (asMember) {
-    const tok = await mintReadToken(asMember);
+    // Control (free tier) can be cold on the first hit — one retry so a member never falls through
+    // to a header-less request that would 403 and look like a broken panel.
+    let tok = await mintReadToken(asMember);
+    if (!tok) { await new Promise((r) => setTimeout(r, 1500)); tok = await mintReadToken(asMember); }
     if (tok) headers = { 'x-window-address': tok.address, 'x-window-sig': tok.sig };
+    else return { status: 0 }; // couldn't mint a member token yet → pending, let the caller retry
   }
   try {
     const res = await fetch(`${GATE_PROBE_URL}/members`, { headers });
@@ -101,11 +105,13 @@ export default function L1() {
   const [actors, setActors] = useState<ControlActor[]>([]);
   const [info, setInfo] = useState<L1Info | null>(null);
 
-  // read-gate demonstrator state
+  // read-gate demonstrator state. `undefined` = not yet resolved (waiting for a member to sign as —
+  // we must NOT probe as an outsider yet, or the card loads showing a spurious 403); `null` = the user
+  // explicitly chose Outsider; a string = viewing as that member.
   const memberActors = useMemo(() => actors.filter((a) => a.role === 'lender' || a.role === 'borrower'), [actors]);
-  const [asMember, setAsMember] = useState<string | null>(null); // null = outsider
+  const [asMember, setAsMember] = useState<string | null | undefined>(undefined);
   const [probe, setProbe] = useState<ProbeResult>(null);
-  const [probing, setProbing] = useState(false);
+  const [probing, setProbing] = useState(true); // starts probing (resolving a member) — never a load-time 403
 
   useEffect(() => {
     let alive = true;
@@ -115,12 +121,23 @@ export default function L1() {
       l1Info().then((i) => { if (alive) setInfo(i); }).catch(() => {});
       l1Allowlist().then((r) => { if (alive) { setRoles(r.rows); setPrecompile(r.precompile); } }).catch(() => {});
     }
-    controlActors().then((a) => {
+    controlActors().then(async (a) => {
       if (!alive) return;
       setActors(a);
       const first = a.find((x) => x.role === 'lender' || x.role === 'borrower');
-      setAsMember(first ? first.address : null);
-    }).catch(() => {});
+      if (first) { setAsMember(first.address); return; }
+      // No actors from Control (cold/unreachable) — fall back to a real member from the public
+      // indexer so the demonstrator still opens on the MEMBER (200) view, never stuck pending.
+      try {
+        const mem = (await (await fetch(`${FUJI_INDEXER_URL}/members`)).json()) as { address: string }[];
+        if (alive) setAsMember(Array.isArray(mem) && mem[0]?.address ? mem[0].address : null);
+      } catch { if (alive) setAsMember(null); }
+    }).catch(async () => {
+      try {
+        const mem = (await (await fetch(`${FUJI_INDEXER_URL}/members`)).json()) as { address: string }[];
+        if (alive) setAsMember(Array.isArray(mem) && mem[0]?.address ? mem[0].address : null);
+      } catch { if (alive) setAsMember(null); }
+    });
     return () => { alive = false; };
   }, [liveL1]);
 
@@ -128,10 +145,21 @@ export default function L1() {
     // Probe live whenever a gated read surface exists: the app's own indexer on the L1
     // build, or the READ_GATE=1 twin on public Fuji. Without either, probing an ungated
     // indexer would 200 for everyone and falsely undercut the thesis — show the design.
-    if (!GATE_PROBE_URL) return;
+    // Skip while asMember is undefined (still resolving) so the card never fires a spurious
+    // outsider probe on load; auto-retry a cold twin/control (status 0) instead of dead-ending.
+    if (!GATE_PROBE_URL || asMember === undefined) return;
     let alive = true;
+    let tries = 0;
     setProbing(true);
-    probeL1Read(asMember).then((r) => { if (alive) { setProbe(r); setProbing(false); } });
+    const run = () => {
+      probeL1Read(asMember).then((r) => {
+        if (!alive) return;
+        if (r?.status === 0 && tries < 3) { tries += 1; setTimeout(run, 2500); return; }
+        setProbe(r);
+        setProbing(false);
+      });
+    };
+    run();
     return () => { alive = false; };
   }, [asMember]);
 
@@ -158,6 +186,26 @@ export default function L1() {
         if (alive) setFuji((f) => ({ ...f, state: 'fallback' }));
       }
     })();
+    return () => { alive = false; };
+  }, []);
+
+  // Always-outsider probe for the competitor split's RIGHT pane. A competitor is by definition a
+  // non-member, so this is independent of the Member/Outsider toggle above: it fires one header-less
+  // request at the gated read surface (the app's own indexer on the L1 build, the READ_GATE=1 twin on
+  // public Fuji) and renders the REAL 403 — the live mirror of the LEFT pane's live participation leak.
+  const [outsiderProbe, setOutsiderProbe] = useState<ProbeResult>(null);
+  useEffect(() => {
+    if (!GATE_PROBE_URL) return; // no gated surface wired (local dev) → RIGHT pane shows the design, not a live 403
+    let alive = true;
+    let tries = 0;
+    const run = () => {
+      probeL1Read(null).then((r) => {
+        if (!alive) return;
+        if (r?.status === 0 && tries < 3) { tries += 1; setTimeout(run, 2500); return; } // cold Render free tier
+        setOutsiderProbe(r);
+      });
+    };
+    run();
     return () => { alive = false; };
   }, []);
 
@@ -343,14 +391,14 @@ export default function L1() {
           right={
             <div className="flex items-center gap-1 bg-white/[0.03] rounded-lg p-0.5 border border-white/[0.05]">
               <button
-                onClick={() => setAsMember(memberActors[0]?.address ?? null)}
-                className={clsx('px-3 py-1.5 rounded-md text-xs font-medium transition-colors', asMember ? 'bg-signal-up/15 text-signal-up' : 'text-gray-400 hover:text-white')}
+                onClick={() => setAsMember(memberActors[0]?.address ?? (typeof asMember === 'string' ? asMember : null))}
+                className={clsx('px-3 py-1.5 rounded-md text-xs font-medium transition-colors', typeof asMember === 'string' ? 'bg-signal-up/15 text-signal-up' : 'text-gray-400 hover:text-white')}
               >
                 Member
               </button>
               <button
                 onClick={() => setAsMember(null)}
-                className={clsx('px-3 py-1.5 rounded-md text-xs font-medium transition-colors', !asMember ? 'bg-signal-down/15 text-signal-down' : 'text-gray-400 hover:text-white')}
+                className={clsx('px-3 py-1.5 rounded-md text-xs font-medium transition-colors', asMember === null ? 'bg-signal-down/15 text-signal-down' : 'text-gray-400 hover:text-white')}
               >
                 Outsider
               </button>
@@ -361,10 +409,12 @@ export default function L1() {
           <div className="glass p-4">
             <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
               <KeyRound className="w-3.5 h-3.5" />
-              {asMember ? (
+              {typeof asMember === 'string' ? (
                 <>viewing as member <span className="num text-gray-300">{shortAddr(asMember)}</span> · Control mints a member-signed token</>
-              ) : (
+              ) : asMember === null ? (
                 <>viewing as a non-member · no token</>
+              ) : (
+                <>resolving a member to sign as…</>
               )}
             </div>
             <div className="num text-xs text-gray-500">GET {GATE_PROBE_URL || INDEXER_URL}/members</div>
@@ -458,27 +508,52 @@ export default function L1() {
             )}
           </div>
 
-          {/* RIGHT — L1 refuses the non-member (live) */}
+          {/* RIGHT — L1 refuses the non-member: a REAL header-less probe of the gated read surface */}
           <div className="bg-surface-2 p-6 border-t lg:border-t-0 lg:border-l border-benchmark-500/15 flex flex-col">
-            <div className="flex items-center gap-2 text-sm font-semibold text-benchmark-300 mb-1">
-              <Lock className="w-4 h-4" /> Permissioned L1
-            </div>
-            <p className="text-xs text-gray-500 mb-4">the same competitor (a non-member) queries the L1 indexer — {liveL1 ? 'live' : 'by design'}</p>
-            <div className="flex-1 flex items-center justify-center min-h-[160px]">
-              <div className="text-center">
-                <Ban className="w-10 h-10 text-signal-down mx-auto mb-3" />
-                <div className="num text-signal-down font-semibold">403 · read refused</div>
-                <p className="text-xs text-gray-600 mt-2 max-w-[240px]">
-                  non-members cannot enumerate members or see any bid — participation is member-gated
-                  {!liveL1 && (
-                    <span className="block mt-1 text-gray-700">
-                      {GATE_PROBE_URL
-                        ? 'this exact refusal is live above — flip Member / Outsider'
-                        : 'enforced live on the sovereign L1 build'}
-                    </span>
-                  )}
-                </p>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2 text-sm font-semibold text-benchmark-300">
+                <Lock className="w-4 h-4" /> Permissioned L1
               </div>
+              {outsiderProbe?.status === 403 && (
+                <span className="pill num bg-benchmark-500/10 text-benchmark-300 border border-benchmark-500/20 text-[10px]">
+                  <Radio className="w-3 h-3 inline mr-1 animate-pulse-soft" />live
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              the same competitor (a non-member) queries the L1 read surface — {GATE_PROBE_URL ? 'live' : 'by design'}
+            </p>
+            <div className="flex-1 flex flex-col items-center justify-center min-h-[160px]">
+              {!GATE_PROBE_URL ? (
+                // No gated surface wired (local dev) — show the L1 DESIGN outcome, never a 403 we can't back.
+                <div className="text-center">
+                  <Ban className="w-10 h-10 text-signal-down mx-auto mb-3" />
+                  <div className="num text-signal-down font-semibold">403 · read refused</div>
+                  <p className="text-xs text-gray-600 mt-2 max-w-[240px]">
+                    non-members cannot enumerate members or see any bid — participation is member-gated
+                    <span className="block mt-1 text-gray-700">enforced live on the sovereign L1 build</span>
+                  </p>
+                </div>
+              ) : outsiderProbe === null ? (
+                <span className="flex items-center gap-2 text-gray-500 text-sm"><Loader2 className="w-4 h-4 animate-spin" /> probing as a non-member…</span>
+              ) : outsiderProbe.status === 403 ? (
+                <div className="text-center">
+                  <Ban className="w-10 h-10 text-signal-down mx-auto mb-3" />
+                  <div className="num text-signal-down font-semibold">403 · read refused</div>
+                  <p className="text-xs text-gray-600 mt-2 max-w-[260px]">
+                    non-members cannot enumerate members or see any bid — participation is member-gated
+                  </p>
+                  <div className="num text-[10px] text-gray-600 mt-2">GET {GATE_PROBE_URL}/members · no member signature</div>
+                </div>
+              ) : outsiderProbe.status === 200 ? (
+                // The gated surface answered a header-less read — the gate isn't enforcing. Report honestly.
+                <div className="text-center">
+                  <div className="num text-signal-stale font-semibold">200 · {outsiderProbe.count} rows</div>
+                  <p className="text-xs text-gray-600 mt-2 max-w-[260px]">read surface returned data without a signature — check READ_GATE on the indexer</p>
+                </div>
+              ) : (
+                <span className="text-gray-600 text-sm flex items-center gap-2"><X className="w-4 h-4" /> gated indexer waking — reload in ~30s</span>
+              )}
             </div>
           </div>
         </div>

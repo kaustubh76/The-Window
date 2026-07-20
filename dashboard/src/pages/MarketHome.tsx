@@ -85,7 +85,7 @@ export default function MarketHome() {
             <div className="min-w-0 flex-1">
               <h2 className="text-base font-semibold text-white">Start trading in one click</h2>
               <p className="text-sm text-gray-400 mt-0.5">
-                Play as a simulated lender or borrower — no wallet, no keys needed. We’ll walk you through it.
+                Join as a real on-chain member, minted server-side — no wallet, no keys needed. We’ll walk you through it.
               </p>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -162,7 +162,7 @@ export default function MarketHome() {
             <StatTile label="Clearing rate" value={latestMonia?.rStarBps != null ? bpsToPctLabel(latestMonia.rStarBps) : '—'} accent="gold" icon={Activity} />
             <StatTile label="Epoch volume" value={latestMonia ? formatVolume(latestMonia) : '—'} icon={Layers} sub="USDC" />
             <StatTile label="Active loans" value={active} accent="cipher" icon={Landmark} sub={`${repaid} repaid · ${defaulted} seized`} />
-            <StatTile label="Members" value={members.length} icon={Users} sub="all simulated" />
+            <StatTile label="Members" value={members.length} icon={Users} sub="registered on-chain" />
           </div>
           <Card>
             <CardHeader title="Recent prints" />
@@ -192,8 +192,7 @@ export default function MarketHome() {
         </div>
       </div>
 
-      {/* On-chain activity feed — real Fuji txs + Snowtrace links when live; honestly
-          framed as simulated in the default mock build (LiveTxFeed gates on ADAPTER_MODE) */}
+      {/* On-chain activity feed — real Fuji txs + Snowtrace links */}
       <LiveTxFeed />
 
       <div className="flex justify-center">

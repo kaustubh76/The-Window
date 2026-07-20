@@ -99,7 +99,7 @@ export default function KeeperConsole() {
       </Card>
 
       <Card>
-        <CardHeader title="Members" subtitle="Vetted allowlist (all simulated)" />
+        <CardHeader title="Members" subtitle="Vetted allowlist — scripted agents marked sim" />
         <div className="space-y-1.5">
           {members.map((m) => (
             <div key={m.address} className="flex items-center justify-between text-sm py-1">

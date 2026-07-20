@@ -18,6 +18,6 @@ Everything below is **deliberately excluded** from the hackathon build (README �
 - **Contract-enforced transfer magnitudes.** Funding/repay magnitude is auditor-attested; a future eERC primitive exposing a verifiable transfer-amount hook could make it contract-enforced.
 
 ## Infrastructure (stretch, not core)
-- **Permissioned L1 deployment.** ✅ **Shipped (local)** during the Speedrun: sovereign L1 `thewindowl1` (chainId 43117) with the Subnet-EVM `TxAllowList` precompile synced from `MemberRegistry` membership by `services/allowlist` — see `demo/run_l1.sh` + `notes/09-permissioned-l1.md`. Remaining roadmap: the same genesis on Fuji-anchored validators (`avalanche blockchain deploy --fuji`) for an always-on public L1.
+- **Permissioned L1 deployment.** ✅ **Shipped**: sovereign L1 `thewindowl1` (chainId 43117) with the Subnet-EVM `TxAllowList` precompile synced from `MemberRegistry` membership by `services/allowlist` — run locally (`avalanche blockchain deploy --local`) and Fuji-anchored (`--fuji -k windowdeployer`, single bootstrap validator) — see `demo/run_l1.sh` + `notes/09-permissioned-l1.md`. Config is live-only (real Fuji keys, no Anvil). Remaining roadmap: multi-validator HA for an always-on public L1.
 - **Auditor key rotation ceremony.** eERC supports rotation; a production runbook (schedule, disclosure, re-encryption) is future work.
 - **Production indexer / HA services.** The hackathon indexer is single-node SQLite/JSON; production would need a durable, replicated event store.

@@ -33,7 +33,7 @@ frontend + read/write APIs so anyone can use the dashboard from a browser.
 ## Topology
 
 ```
- browser ──HTTPS──► Vercel (static dist, VITE_ADAPTER=live)
+ browser ──HTTPS──► Vercel (static dist, live-only build)
    │                    │  fetches
    │                    ├──► https://window-indexer-w3pv.onrender.com   (reads: /events /loans /monia/* …)
    │                    └──► https://window-control-opuo.onrender.com   (writes: /member/* /admin/* /keeper/*)
@@ -118,7 +118,7 @@ Two **free web services**, both from the one image, differing only in start comm
 The dashboard is deployed as a **prebuilt static `dist`**, not a Vercel source-build — this keeps the
 baked backend URLs deterministic (see [07](07-decisions-and-gotchas.md)).
 
-- Build env: `dashboard/.env.production` (gitignored; Vite loads it in `build` mode) — `VITE_ADAPTER=live`,
+- Build env: `dashboard/.env.production` (gitignored; Vite loads it in `build` mode) —
   `VITE_CHAIN_ID=43113`, `VITE_RPC_FUJI=<public Fuji RPC>`, `VITE_INDEXER_URL=https://window-indexer-w3pv.onrender.com`,
   `VITE_CONTROL_URL=https://window-control-opuo.onrender.com`, and all `VITE_*_ADDR` from `dashboard/.env`.
 - `cd dashboard && npm run build` → copy `dist/*` into `dashboard/.vercel_static/` (gitignored) + a

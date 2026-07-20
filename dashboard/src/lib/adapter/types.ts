@@ -105,13 +105,6 @@ export interface Balances {
   registered: boolean;
 }
 
-export interface SessionState {
-  address: Address | null;
-  registered: boolean;
-  bjjPublicKey?: [string, string];
-  persona: Persona[];
-}
-
 // ---- proof + tx surfacing ----
 export type ProofPhase = 'idle' | 'building-witness' | 'proving' | 'verifying' | 'done' | 'error';
 export interface ProofProgress {

@@ -16,8 +16,8 @@ export default function ConnectWallet() {
 
   if (!address) {
     // One connect entry everywhere: open the shared PersonaPicker modal (mounted in Layout).
-    // Both modes use the persona/actor picker — mock → DemoEngine personas, live → the
-    // Control API's actor EOAs (a real wallet can't be a Control actor).
+    // The picker onboards a real member or steps into one of the Control API's actor EOAs
+    // (a real browser wallet can't be a Control actor — Control holds the keys).
     return (
       <button
         onClick={() => window.dispatchEvent(new Event('personapicker:open'))}

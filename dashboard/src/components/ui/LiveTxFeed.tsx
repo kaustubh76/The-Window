@@ -1,10 +1,9 @@
-import { Radio, FlaskConical } from 'lucide-react';
+import { Radio } from 'lucide-react';
 import { useEventFeed } from '../../hooks/useEventFeed';
 import { TxLink } from './TxLink';
 import { Card, CardHeader } from './Card';
 import { shortAddr } from './AddressChip';
 import { bpsToPctLabel, tickToBps } from '../../lib/rates';
-import { ADAPTER_MODE } from '../../config';
 import type { WindowEvent } from '../../lib/adapter/types';
 
 // One-line human label + accent color for an on-chain event in the live tx feed.
@@ -23,11 +22,8 @@ function describe(e: WindowEvent): { label: string; cls: string } | null {
   }
 }
 
-// On-chain activity feed. On a LIVE deployment these are the real Fuji txs the autonomous
-// stack fires, each linking out to Snowtrace. In the default MOCK deployment there is no
-// chain, so the header must say so honestly (no "Real Fuji" / pulsing "live" claim) — the
-// mode gate below keeps this feed truthful in both builds. Reuses the Explorer firehose.
-const IS_LIVE = ADAPTER_MODE === 'live';
+// On-chain activity feed: the real Fuji txs the autonomous stack fires, each linking
+// out to Snowtrace. Reuses the Explorer firehose.
 export function LiveTxFeed({ limit = 8 }: { limit?: number }) {
   const feed = useEventFeed();
   const rows = [...feed]
@@ -39,27 +35,17 @@ export function LiveTxFeed({ limit = 8 }: { limit?: number }) {
   return (
     <Card>
       <CardHeader
-        title={IS_LIVE ? 'Live on-chain activity' : 'Simulated market activity'}
-        subtitle={
-          IS_LIVE
-            ? 'Real Fuji transactions — click to verify on Snowtrace'
-            : 'Demo engine — connect a live deployment to see real Snowtrace links'
-        }
+        title="Live on-chain activity"
+        subtitle="Real Fuji transactions — click to verify on Snowtrace"
         right={
-          IS_LIVE ? (
-            <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-benchmark-400/80">
-              <Radio className="w-3 h-3 animate-pulse-soft" /> live
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-gray-500">
-              <FlaskConical className="w-3 h-3" /> demo
-            </span>
-          )
+          <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-benchmark-400/80">
+            <Radio className="w-3 h-3 animate-pulse-soft" /> live
+          </span>
         }
       />
       <div className="space-y-0 max-h-[280px] overflow-y-auto">
         {rows.length === 0 && (
-          <p className="text-sm text-gray-600 py-2">{IS_LIVE ? 'Waiting for on-chain transactions…' : 'Simulating market activity…'}</p>
+          <p className="text-sm text-gray-600 py-2">Waiting for on-chain transactions…</p>
         )}
         {rows.map(({ e, i, d }) => (
           <div key={`${i}-${e.type}`} className="flex items-center gap-2 py-1.5 border-b border-white/[0.04] last:border-0 text-[11px] animate-fade-in-down">

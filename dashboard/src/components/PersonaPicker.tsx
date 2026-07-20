@@ -3,9 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { FlaskConical, Loader2, ArrowRight, UserPlus, ShieldCheck } from 'lucide-react';
 import { useSessionStore } from '../stores/useSessionStore';
 import { useToast } from '../contexts/ToastContext';
-import { ADAPTER_MODE } from '../config';
 import { controlOnboard } from '../services/control';
-import { loadPersonaOptions, personaLanding, MOCK_PERSONA_OPTIONS, type PersonaOption } from '../lib/personaOptions';
+import { loadPersonaOptions, personaLanding, type PersonaOption } from '../lib/personaOptions';
 import type { Address } from '../lib/adapter/types';
 
 // The single "who do you want to play as" chooser — one modal reused by the header, the
@@ -14,9 +13,7 @@ import type { Address } from '../lib/adapter/types';
 // PersonaSwitcher: loadPersonaOptions → connect() → land on the desk/console → toast.
 export function PersonaPicker() {
   const [open, setOpen] = useState(false);
-  const [personas, setPersonas] = useState<PersonaOption[] | null>(
-    ADAPTER_MODE === 'live' ? null : MOCK_PERSONA_OPTIONS,
-  );
+  const [personas, setPersonas] = useState<PersonaOption[] | null>(null);
   const firstRef = useRef<HTMLButtonElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
 
@@ -32,7 +29,10 @@ export function PersonaPicker() {
     setJoining(true);
     try {
       const m = await controlOnboard();
-      connect(m.address, 'wallet', m.roles, m.label);
+      // Custodial member (Control holds its key) — same session-source as the picker actors, NOT a
+      // browser-wallet handshake. Labeling it 'wallet' made useWalletSync auto-disconnect it the
+      // instant it joined (wagmi isConnected is always false here), bouncing the user out.
+      connect(m.address, 'persona', m.roles, m.label);
       navigate(personaLanding(m.roles));
       toast.success(`You're in as ${m.label} — a real member, minted just now`);
       close();
@@ -57,9 +57,9 @@ export function PersonaPicker() {
   useEffect(() => {
     if (!open) return;
     restoreRef.current = document.activeElement as HTMLElement;
-    // (Re)load in case live actors changed; mock is already seeded. Guard with a timeout so a
-    // HANGING (not erroring) Control API can't leave the spinner up forever — fall back to the
-    // honest empty state after 8s.
+    // (Re)load in case the actor roster changed. Guard with a timeout so a HANGING (not
+    // erroring) Control API can't leave the spinner up forever — fall back to the honest
+    // empty state after 8s.
     let done = false;
     const settle = (o: PersonaOption[]) => { if (!done) { done = true; setPersonas(o); } };
     loadPersonaOptions().then(settle).catch(() => settle([]));
@@ -85,19 +85,18 @@ export function PersonaPicker() {
 
   const members = (personas ?? []).filter((o) => o.roles.includes('lender') || o.roles.includes('borrower'));
   const ops = (personas ?? []).filter((o) => o.roles.includes('admin') || o.roles.includes('keeper'));
-  const loading = ADAPTER_MODE === 'live' && personas === null;
+  const loading = personas === null;
   const empty = personas != null && personas.length === 0;
 
   const Group = ({ title, items }: { title: string; items: PersonaOption[] }) =>
     items.length === 0 ? null : (
       <div className="mb-2 last:mb-0">
         <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-gray-500">{title}</div>
-        {items.map((o, i) => {
+        {items.map((o) => {
           const Icon = o.icon;
           return (
             <button
               key={o.address}
-              ref={ADAPTER_MODE !== 'live' && title === 'Members' && i === 0 ? firstRef : undefined}
               onClick={() => pick(o)}
               className="group w-full flex items-center gap-3 px-2.5 py-2.5 rounded-lg hover:bg-white/[0.05] focus-visible:bg-white/[0.05] transition-colors text-left outline-none"
             >
@@ -129,37 +128,35 @@ export function PersonaPicker() {
           <div className="min-w-0">
             <div className="text-sm font-semibold text-white">Enter The Window</div>
             <div className="text-[11px] text-gray-500">
-              {ADAPTER_MODE === 'live' ? 'Create your own member, or explore as a demo actor' : 'Simulated personas — no wallet, no keys needed'}
+              Create your own member, or explore as a demo actor
             </div>
           </div>
           <span className="ml-auto pill num bg-white/[0.05] text-gray-500 border border-white/[0.08] text-[10px]">esc</span>
         </div>
         <div className="overflow-y-auto py-1.5">
-          {ADAPTER_MODE === 'live' && (
-            <div className="px-1.5 pb-2 mb-1.5 border-b border-white/[0.06]">
-              <button
-                ref={firstRef}
-                onClick={join}
-                disabled={joining}
-                className="group w-full flex items-center gap-3 px-2.5 py-3 rounded-lg bg-benchmark-500/10 hover:bg-benchmark-500/15 border border-benchmark-500/25 transition-colors text-left outline-none disabled:opacity-70"
-              >
-                <div className="w-9 h-9 rounded-lg bg-benchmark-500/20 text-benchmark-300 flex items-center justify-center flex-shrink-0">
-                  {joining ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+          <div className="px-1.5 pb-2 mb-1.5 border-b border-white/[0.06]">
+            <button
+              ref={firstRef}
+              onClick={join}
+              disabled={joining}
+              className="group w-full flex items-center gap-3 px-2.5 py-3 rounded-lg bg-benchmark-500/10 hover:bg-benchmark-500/15 border border-benchmark-500/25 transition-colors text-left outline-none disabled:opacity-70"
+            >
+              <div className="w-9 h-9 rounded-lg bg-benchmark-500/20 text-benchmark-300 flex items-center justify-center flex-shrink-0">
+                {joining ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-white truncate">
+                  {joining ? 'Minting your member…' : 'Join The Window'}
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-white truncate">
-                    {joining ? 'Minting your member…' : 'Join The Window'}
-                  </div>
-                  <div className="text-[11px] text-benchmark-300/80 truncate inline-flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3 flex-shrink-0" />
-                    {joining ? 'registering key · funding gas · seeding balance' : 'create your own real encrypted member'}
-                  </div>
+                <div className="text-[11px] text-benchmark-300/80 truncate inline-flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 flex-shrink-0" />
+                  {joining ? 'registering key · funding gas · seeding balance' : 'create your own real encrypted member'}
                 </div>
-                {!joining && <ArrowRight className="w-4 h-4 text-benchmark-400 group-hover:translate-x-0.5 transition-all flex-shrink-0" />}
-              </button>
-              <div className="px-2.5 pt-1.5 text-[10px] uppercase tracking-wider text-gray-600">or explore as a demo actor</div>
-            </div>
-          )}
+              </div>
+              {!joining && <ArrowRight className="w-4 h-4 text-benchmark-400 group-hover:translate-x-0.5 transition-all flex-shrink-0" />}
+            </button>
+            <div className="px-2.5 pt-1.5 text-[10px] uppercase tracking-wider text-gray-600">or explore as a demo actor</div>
+          </div>
           {loading && (
             <div className="flex items-center gap-2 px-3 py-6 text-sm text-gray-500">
               <Loader2 className="w-4 h-4 animate-spin" /> Loading actors…
@@ -167,7 +164,7 @@ export function PersonaPicker() {
           )}
           {empty && (
             <div className="px-3 py-6 text-center text-sm text-gray-500">
-              No actors available. In live mode, the Control API must be reachable.
+              No actors available — the Control API must be reachable.
             </div>
           )}
           <Group title="Members" items={members} />

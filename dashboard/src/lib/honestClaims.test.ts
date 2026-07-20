@@ -39,16 +39,25 @@ describe('honest-claims guardrail (CI)', () => {
     expect(claims).toMatch(/can decrypt individual amounts/i);
   });
 
-  // Class-of-bug guard: the default deployment is MOCK, so any component that asserts
-  // real on-chain activity ("Real Fuji transactions", a pulsing live badge) must gate that
-  // copy on ADAPTER_MODE — otherwise a mock build makes a live claim it can't back.
-  it('live-only "Real Fuji" copy is gated on ADAPTER_MODE', () => {
-    const LIVE_ONLY = /Real Fuji transactions/;
+  // The verifiability claim is a feature: the live feed must keep saying its txs are
+  // real and Snowtrace-checkable — silently losing that copy would drop the
+  // proof-in-one-click story the deployment is built around.
+  it('the live tx feed keeps its Snowtrace verifiability claim', () => {
+    const feed = fs.readFileSync(path.resolve(SRC, 'components/ui/LiveTxFeed.tsx'), 'utf8');
+    expect(feed).toMatch(/Real Fuji transactions/);
+    expect(feed).toMatch(/Snowtrace/);
+  });
+
+  // Single-path architecture lock: the mock adapter was removed — the app has exactly one
+  // data path (indexer reads + Control API writes against the real chain). Nothing under
+  // src/ may reference the mock again, so a reintroduced simulation can't quietly serve
+  // fabricated data under live copy.
+  it('no mock-adapter references anywhere in src/', () => {
+    const FORBIDDEN = /MockAdapter|DemoEngine|VITE_ADAPTER|adapter\/mock|hasDemoControls|useDemoStore/;
+    const hits: string[] = [];
     for (const f of files) {
-      const src = fs.readFileSync(f, 'utf8');
-      if (LIVE_ONLY.test(src)) {
-        expect(src, `${path.relative(SRC, f)} makes a live claim without gating on ADAPTER_MODE`).toMatch(/ADAPTER_MODE/);
-      }
+      if (FORBIDDEN.test(fs.readFileSync(f, 'utf8'))) hits.push(path.relative(SRC, f));
     }
+    expect(hits).toEqual([]);
   });
 });

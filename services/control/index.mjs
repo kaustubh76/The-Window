@@ -23,15 +23,22 @@ const IS_L1 = CHAIN_ID === 43117;
 // Dynamically-onboarded members are custodied EOAs (real users, not the 8 baked personas). We
 // persist their keys so they survive a control restart within an instance (Render's disk is
 // ephemeral across redeploys — acceptable for the demo; a redeploy just re-empties the roster).
-const DYN_FILE = fileURLToPath(new URL("./dynamic-actors.json", import.meta.url));
+// Chain-scope the roster so a Fuji-onboarded member (funded + allowlisted on 43113) never loads
+// on the L1 (43117), where it is neither in genesis alloc nor TxAllowList-enabled and its txs
+// would revert. Each network keeps its own file, mirroring contracts/deployments/<CHAIN_ID>.json.
+const DYN_FILE = fileURLToPath(new URL(`./dynamic-actors.${CHAIN_ID}.json`, import.meta.url));
+const LEGACY_DYN_FILE = fileURLToPath(new URL("./dynamic-actors.json", import.meta.url));
 const MAX_DYNAMIC = Number(process.env.MAX_DYNAMIC_MEMBERS || 50);
 const ONBOARD_MICRO = BigInt(Number(process.env.ONBOARD_USDC || 1000)) * 1_000_000n;
 function loadDynamicActors() {
-  try {
-    const rows = JSON.parse(readFileSync(DYN_FILE, "utf8"));
-    for (const row of rows) addDynamicActor({ pk: row.pk, role: row.role || "member", name: row.name });
-    if (rows.length) console.log(`[control] reloaded ${rows.length} dynamic member(s)`);
-  } catch { /* none yet */ }
+  // prefer the chain-scoped file; on Fuji fall back to the pre-scoping file so existing members survive
+  for (const f of CHAIN_ID === 43113 ? [DYN_FILE, LEGACY_DYN_FILE] : [DYN_FILE]) {
+    try {
+      const rows = JSON.parse(readFileSync(f, "utf8"));
+      for (const row of rows) addDynamicActor({ pk: row.pk, role: row.role || "member", name: row.name });
+      if (rows.length) { console.log(`[control] reloaded ${rows.length} dynamic member(s) from ${f.split("/").pop()}`); return; }
+    } catch { /* try next */ }
+  }
 }
 function persistDynamic() {
   try { writeFileSync(DYN_FILE, JSON.stringify(listDynamic().map((a) => ({ name: a.name, pk: a.pk, role: a.role, address: a.address })), null, 2)); }
@@ -122,8 +129,17 @@ app.post("/member/read-token", async (q, r) => {
     const address = String(q.body.address || "");
     if (!ethers.isAddress(address)) return r.status(400).json({ ok: false, error: "bad address" });
     const actor = actorByAddress(address);
-    const isMember = actor ? await handles().registry.isMember(address).catch(() => false) : false;
-    if (!actor || !isMember) return r.status(403).json({ ok: false, error: "not a member — the L1 read surface is member-gated" });
+    // No key for this address → we genuinely can't mint a member-signed token (the honest
+    // non-member 403 — the intruder has no key here, which IS the read-gate contrast).
+    if (!actor) return r.status(403).json({ ok: false, error: "not a member — the L1 read surface is member-gated" });
+    // Baked personas are always registered members; only re-check a dynamic (revocable) one.
+    // NEVER fail closed on a transient isMember RPC error — that spuriously 403'd real members on a
+    // Render cold start / Fuji-RPC hiccup. The indexer's READ_GATE re-verifies membership on the
+    // actual read (the real boundary), so token issuance may fail OPEN on an RPC error.
+    if (actor.dynamic) {
+      const member = await handles().registry.isMember(address).then(Boolean).catch(() => null);
+      if (member === false) return r.status(403).json({ ok: false, error: "membership revoked — no longer a member" });
+    }
     const bucket = Math.floor(Date.now() / 30000); // window-read:<floor(now/30s)>
     const sig = await new ethers.Wallet(ACTORS[actor.name].pk).signMessage(`window-read:${bucket}`);
     r.json({ ok: true, address: actor.address, sig, bucket });
@@ -134,13 +150,14 @@ app.get("/l1/allowlist", async (_q, r) => {
   try {
     const H = handles();
     const allow = new ethers.Contract(TXALLOWLIST, ALLOWLIST_ABI, provider);
-    // ops roles + the five members + the never-member intruder (anvil #8) for the contrast
+    // ops roles + the five members + the never-member intruder (purpose-generated, non-Anvil;
+    // see demo/l1-fixtures.mjs — must match l1/genesis.json alloc) for the contrast
     const roster = [
       { name: "admin", label: "admin", address: ACTORS.admin?.address },
       { name: "keeper", label: "keeper", address: ACTORS.keeper?.address },
       { name: "operator", label: "operator", address: ACTORS.operator?.address },
       ...MEMBER_NAMES.map((n) => ({ name: n, label: n, address: ACTORS[n]?.address })),
-      { name: "intruder", label: "intruder (never a member)", address: "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f" },
+      { name: "intruder", label: "intruder (never a member)", address: "0xBd44F6408CeFEF23fca5e9Ef209F3f9B54a7ab7C" },
     ].filter((x) => x.address);
     const rows = await Promise.all(roster.map(async (x) => {
       const [roleRaw, isMember] = await Promise.all([

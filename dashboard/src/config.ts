@@ -2,11 +2,9 @@
 // Every duration reads from a DEMO/PROD profile; never hardcode durations elsewhere.
 
 export type Profile = 'DEMO' | 'PROD';
-export type AdapterMode = 'mock' | 'live';
 
 const env = import.meta.env;
 
-export const ADAPTER_MODE: AdapterMode = (env.VITE_ADAPTER as AdapterMode) ?? 'mock';
 export const PROFILE: Profile = (env.VITE_PROFILE as Profile) ?? 'DEMO';
 
 // ---- time profiles (ms) ----
@@ -17,8 +15,8 @@ export interface TimeProfile {
   epochLabel: string;
   tenorLabel: string;
 }
-// Single source of truth for both the mock clock (engine.ts reads this) and every label.
-// DEMO matches the pace the DemoEngine actually runs at — keep them equal so labels never lie.
+// Single source of truth for every profile label; the real pacing comes from the chain
+// (indexer /epoch/clock) — keep these equal to the deployed params so labels never lie.
 export const TIME_PROFILES: Record<Profile, TimeProfile> = {
   DEMO: { epochLenMs: 22_000, tenorMs: 30_000, label: 'DEMO', epochLabel: '22s', tenorLabel: '30s' },
   PROD: { epochLenMs: 3_600_000, tenorMs: 21_600_000, label: 'PROD', epochLabel: '1h', tenorLabel: '6h' },
@@ -68,7 +66,7 @@ export const CHAIN_LABEL = IS_L1
 
 export const INDEXER_URL = env.VITE_INDEXER_URL ?? '/api';
 // Control API — the backend that performs member/admin/keeper WRITES server-side
-// (proven eerc-node flows) for the disclosed simulated members. See services/control.
+// (proven eerc-node flows) for scripted agents and onboarded members alike. See services/control.
 export const CONTROL_URL = env.VITE_CONTROL_URL ?? 'http://127.0.0.1:8899';
 export const SNOWTRACE_URL = env.VITE_SNOWTRACE_URL ?? 'https://testnet.snowtrace.io';
 // The live hosted Fuji indexer — read by the /l1 competitor pane to show the REAL
@@ -99,14 +97,15 @@ export const KEEPER_ADDR = (env.VITE_KEEPER_ADDR ?? '').toLowerCase();
 export const TAGLINE = 'The rate is public. The borrowing never was.';
 
 // ---- boot-time config sanity ----
-// Catch the one sharp edge a hosted LIVE build can hit: if VITE_CONTROL_URL is unset, the
-// live adapter silently posts every member/keeper/admin write to localhost and fails with
-// no user-visible cause. Surface it loudly instead of failing in silence.
+// Catch the one sharp edge a hosted build can hit: if VITE_CONTROL_URL is unset, the
+// adapter silently posts every member/keeper/admin write to localhost and fails with
+// no user-visible cause. Surface it loudly instead of failing in silence. (Local dev
+// against local services intentionally trips this — the banner is the reminder.)
 function computeConfigWarnings(): string[] {
   const w: string[] = [];
-  if (ADAPTER_MODE === 'live' && /localhost|127\.0\.0\.1/.test(CONTROL_URL)) {
+  if (/localhost|127\.0\.0\.1/.test(CONTROL_URL)) {
     w.push(
-      `Live mode but Control API points at ${CONTROL_URL} — set VITE_CONTROL_URL to the hosted Control API or every write will fail.`,
+      `Control API points at ${CONTROL_URL} — set VITE_CONTROL_URL to the hosted Control API or every write will fail.`,
     );
   }
   return w;

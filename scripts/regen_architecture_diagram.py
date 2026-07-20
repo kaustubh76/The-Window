@@ -425,7 +425,7 @@ new_elements = []
 # --- Hosting & automation band (full width, bottom) ---
 HB_TOP = band_demo_bottom + 60
 host_boxes = [
-    ("h_vercel",   120,  "VERCEL — static frontend", "dist → the-window-five.vercel.app\nVITE_ADAPTER=live · browser holds NO keys", "#e7f5ff"),
+    ("h_vercel",   120,  "VERCEL — static frontend", "dist → the-window-five.vercel.app\nlive-only build · browser holds NO keys", "#e7f5ff"),
     ("h_render_i", 470,  "RENDER — window-indexer", "window-indexer-w3pv.onrender.com\nread-only REST · rebuilds from Fuji", "#d3f9d8"),
     ("h_render_c", 820,  "RENDER — window-control", "window-control-opuo.onrender.com\nsingle write API · server-side proving", "#d3f9d8"),
     ("h_docker",  1170,  "DOCKER HUB image", "kaushtubh02/thewindow-backend\nbakes ABIs · 43113.json · zkeys", "#fff3bf"),

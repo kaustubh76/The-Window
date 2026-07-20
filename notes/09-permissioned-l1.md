@@ -38,9 +38,9 @@ on the privacy spectrum — mastery of both Avalanche primitives, not a copy.
 avalanche-cli local network (avalanchego + Subnet-EVM v0.8.0)
   └─ L1 "thewindowl1" — chainId 43117, PoA, token WIN, genesis l1/genesis.json
        ├─ TxAllowList precompile (0x0200…0002), active from genesis:
-       │    admin  = anvil#0 (role Admin)
-       │    enabled at genesis = keeper (#1), operator (#2)   ← ops roles only
-       │    members (#3-#7) NOT enabled — they earn access via MemberRegistry
+       │    admin  = ADMIN 0x6358…cd82 (role Admin)
+       │    enabled at genesis = KEEPER 0xb778…a4Fd, OPERATOR 0x363E…9992   ← ops roles only
+       │    members (the 5 baked personas) NOT enabled — they earn access via MemberRegistry
        ├─ full WINDOW stack (same DeployAll, USE_REAL_VERIFIERS=1, chunked PoCD)
        │    → contracts/deployments/43117.json (per-machine, regenerated)
        └─ services (ports 8788/8900 — runs ALONGSIDE the Fuji stack):
@@ -87,7 +87,7 @@ WHEN — the participation leak). On the L1 that read surface is **member-gated*
 
 | File | What |
 |---|---|
-| `l1/genesis.json` | Subnet-EVM genesis: chainId 43117, feeConfig (20M gas limit), `txAllowListConfig`, prefunded anvil actors + one never-member "intruder" EOA (anvil #8) for the negative test |
+| `l1/genesis.json` | Subnet-EVM genesis: chainId 43117, feeConfig (20M gas limit), `txAllowListConfig` (real Fuji ADMIN admin, KEEPER+OPERATOR enabled), prefunded real ops + 5 member EOAs + one never-member "intruder" EOA for the negative test (live-only — no Anvil) |
 | `scripts/deploy_l1.sh` | DeployAll → `deployments/43117.json` (real verifiers; EPOCH_LEN=60, TENOR_BLOCKS=20) |
 | `services/allowlist/index.mjs` | the MemberRegistry → TxAllowList sync keeper (write-gate) |
 | `services/indexer/index.mjs` | `READ_GATE` middleware — member-signature-gated reads (read-gate) |
@@ -102,10 +102,10 @@ WHEN — the participation leak). On the L1 that read surface is **member-gated*
 ```bash
 avalanche blockchain create thewindowl1 --evm --genesis l1/genesis.json \
   --proof-of-authority \
-  --validator-manager-owner 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
-  --proxy-contract-owner   0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+  --validator-manager-owner 0x6358c6B980fad929247b932207893b4dB2F7cd82 \
+  --proxy-contract-owner   0x6358c6B980fad929247b932207893b4dB2F7cd82 \
   --evm-token WIN --latest --icm=false
-avalanche blockchain deploy thewindowl1 --local
+avalanche blockchain deploy thewindowl1 --local   # (or --fuji -k windowdeployer to anchor to Fuji)
 # RPC = "RPC Endpoint" row of: avalanche blockchain describe thewindowl1
 ```
 
