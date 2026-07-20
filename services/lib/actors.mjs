@@ -26,12 +26,12 @@ function bjjRaw(name) {
   return BigInt(ethers.keccak256(ethers.toUtf8Bytes("the-window:bjj:" + name)));
 }
 
-// Fallback keys (Anvil PKs above, demo auditor below) are for local chains ONLY:
-// Anvil 31337 and the local permissioned L1 43117 (run_l1.sh's zero-secret posture
-// relies on the demo auditor default). On any real network a missing env var must
-// fail loudly, not silently sign with a publicly-known key.
+// Fallback keys (Anvil PKs above, demo auditor below) are for the local Anvil chain
+// (31337) ONLY. The permissioned L1 (43117) is now live-only: like Fuji, it must be
+// driven with the real role keys + auditor from .env, so a missing env var fails loudly
+// rather than silently signing with a publicly-known Anvil key.
 const CHAIN_ID = Number(process.env.CHAIN_ID || 31337);
-const LOCAL_CHAIN = [31337, 43117].includes(CHAIN_ID);
+const LOCAL_CHAIN = [31337].includes(CHAIN_ID);
 function localOnly(value, what) {
   if (!LOCAL_CHAIN) throw new Error(`[actors] FATAL: ${what} required on chain ${CHAIN_ID} — built-in fallbacks are local-only`);
   return value;

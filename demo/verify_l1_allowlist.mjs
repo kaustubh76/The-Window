@@ -9,6 +9,7 @@
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { INTRUDER_PK } from "./l1-fixtures.mjs";
 const require = createRequire(resolve(dirname(fileURLToPath(import.meta.url)), "../services/package.json"));
 const { JsonRpcProvider, Wallet, Contract } = require("ethers");
 
@@ -19,10 +20,11 @@ const provider = new JsonRpcProvider(RPC);
 const PRECOMPILE = "0x0200000000000000000000000000000000000002";
 const allow = new Contract(PRECOMPILE, ["function readAllowList(address) view returns (uint256)"], provider);
 
-// Anvil #8 — funded in l1/genesis.json but NEVER a member: must be chain-blocked.
-const INTRUDER_PK = "0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97";
-// Anvil #3 = lender1 — a MemberRegistry member the allowlist keeper must have enabled.
-const MEMBER_PK = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6";
+// INTRUDER_PK (demo/l1-fixtures.mjs): a purpose-generated never-member, funded in l1/genesis.json
+// but never enabled — must be chain-blocked. lender1 is a real MemberRegistry member the allowlist
+// keeper must have enabled — sign as its REAL key (Fuji-anchored L1 is live-only, no Anvil keys).
+const MEMBER_PK = process.env.LENDER1_PK;
+if (!MEMBER_PK) { console.error("LENDER1_PK required (real member key) — source the root .env"); process.exit(1); }
 
 let failures = 0;
 const check = (ok, label) => { console.log(`${ok ? "PASS" : "FAIL"}  ${label}`); if (!ok) failures++; };

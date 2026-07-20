@@ -23,10 +23,12 @@ const provider = new JsonRpcProvider(RPC);
 const READGATE_URL = process.env.READGATE_URL || process.env.INDEXER_L1_URL || "http://127.0.0.1:8788";
 
 const dep = JSON.parse(readFileSync(resolve(__dir, "../contracts/deployments/43117.json"), "utf8"));
-// admin (#0) is the MemberRegistry admin; overridable via env for real deployments.
-const ADMIN_PK = process.env.ADMIN_PK || "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-// subject = agent5 (#7): a real funded member, so we can show it COULD transact before.
-const SUBJECT_PK = process.env.SUBJECT_PK || "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356";
+// admin = the MemberRegistry admin (real key from .env; the live-only L1 has no Anvil fallback).
+const ADMIN_PK = process.env.ADMIN_PK;
+if (!ADMIN_PK) { console.error("ADMIN_PK required — source the root .env"); process.exit(1); }
+// subject = agent5, a real funded member (so it COULD transact before we revoke it).
+const SUBJECT_PK = process.env.SUBJECT_PK || process.env.AGENT5_PK;
+if (!SUBJECT_PK) { console.error("SUBJECT_PK or AGENT5_PK required — source the root .env"); process.exit(1); }
 
 const admin = new Wallet(ADMIN_PK, provider);
 const subject = new Wallet(SUBJECT_PK, provider);

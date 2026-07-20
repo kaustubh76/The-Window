@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Deploy the full WINDOW stack to the local permissioned Avalanche L1 ("thewindowl1",
+# Deploy the full WINDOW stack to the permissioned Avalanche L1 ("thewindowl1",
 # chainId 43117, created from l1/genesis.json — Subnet-EVM with the TxAllowList
-# precompile). Same zero-secret posture as the local demos: Anvil default keys +
-# the fixed demo auditor keypair. Writes contracts/deployments/43117.json.
+# precompile). Live-only: real role keys + auditor come from the root .env (no Anvil),
+# matching genesis's real TxAllowList admin/enabled roles. Writes deployments/43117.json.
 #
 # Prereq: the L1 is running —
 #   avalanche blockchain create thewindowl1 --evm --genesis l1/genesis.json \
-#     --proof-of-authority --validator-manager-owner <anvil#0> \
-#     --proxy-contract-owner <anvil#0> --evm-token WIN --latest --icm=false
-#   avalanche blockchain deploy thewindowl1 --local
+#     --proof-of-authority --validator-manager-owner 0x6358c6B980fad929247b932207893b4dB2F7cd82 \
+#     --proxy-contract-owner   0x6358c6B980fad929247b932207893b4dB2F7cd82 --evm-token WIN --latest --icm=false
+#   avalanche blockchain deploy thewindowl1 --local   # (or --fuji -k windowdeployer for the Fuji-anchored L1)
 # RPC_L1 = the "RPC Endpoint" from `avalanche blockchain describe thewindowl1`.
 set -euo pipefail
 export PATH="$HOME/.cargo/bin:$HOME/.foundry/bin:$PATH"
@@ -16,13 +16,18 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 : "${RPC_L1:?RPC_L1 required — see: avalanche blockchain describe thewindowl1}"
 
-# Anvil default keys (public test keys, same as run_demo/run_autonomous)
-export ADMIN_PK="${ADMIN_PK:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"   # #0
-KEEPER_PK="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"                      # #1
-OPERATOR_PK="0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"                    # #2
-# fixed demo auditor keypair (services/lib/actors.mjs defaults)
-AUDITOR_PUB_X="${AUDITOR_BJJ_PUB_X:-15126131017275559229883198140197230023892265818363501039953620538039205717764}"
-AUDITOR_PUB_Y="${AUDITOR_BJJ_PUB_Y:-7504911034826791718448377250227968384413910115391011404817860837847273794444}"
+# Live-only: real role keys + auditor from the root .env (Fuji throwaways) — no Anvil.
+[ -f "$ROOT/.env" ] || { echo "ERROR: root .env missing — the live-only L1 needs real keys"; exit 1; }
+set -a; source "$ROOT/.env"; set +a
+for v in ADMIN_PK KEEPER_PK VAULT_OPERATOR_PK AUDITOR_BJJ_PUB_X AUDITOR_BJJ_PUB_Y; do
+  [ -n "${!v:-}" ] || { echo "ERROR: $v missing in .env — the live-only L1 requires real keys"; exit 1; }
+done
+# preflight: every driver key's address must match l1/genesis.json (admin/enabled/alloc) — else
+# the deploy or a later onlyAdmin/allowlist tx would revert. Fails loud on any mismatch.
+node "$ROOT/scripts/preflight_l1.mjs"
+OPERATOR_PK="$VAULT_OPERATOR_PK"
+AUDITOR_PUB_X="$AUDITOR_BJJ_PUB_X"
+AUDITOR_PUB_Y="$AUDITOR_BJJ_PUB_Y"
 
 KEEPER_ADDR="$(cast wallet address --private-key "$KEEPER_PK")"
 VAULT_OPERATOR_ADDR="$(cast wallet address --private-key "$OPERATOR_PK")"

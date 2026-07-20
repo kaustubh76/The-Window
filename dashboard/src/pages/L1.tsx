@@ -189,6 +189,26 @@ export default function L1() {
     return () => { alive = false; };
   }, []);
 
+  // Always-outsider probe for the competitor split's RIGHT pane. A competitor is by definition a
+  // non-member, so this is independent of the Member/Outsider toggle above: it fires one header-less
+  // request at the gated read surface (the app's own indexer on the L1 build, the READ_GATE=1 twin on
+  // public Fuji) and renders the REAL 403 — the live mirror of the LEFT pane's live participation leak.
+  const [outsiderProbe, setOutsiderProbe] = useState<ProbeResult>(null);
+  useEffect(() => {
+    if (!GATE_PROBE_URL) return; // no gated surface wired (local dev) → RIGHT pane shows the design, not a live 403
+    let alive = true;
+    let tries = 0;
+    const run = () => {
+      probeL1Read(null).then((r) => {
+        if (!alive) return;
+        if (r?.status === 0 && tries < 3) { tries += 1; setTimeout(run, 2500); return; } // cold Render free tier
+        setOutsiderProbe(r);
+      });
+    };
+    run();
+    return () => { alive = false; };
+  }, []);
+
   // live atomic revocation
   const [revoking, setRevoking] = useState(false);
   const [revokeSteps, setRevokeSteps] = useState<RevokeStep[] | null>(null);
@@ -488,27 +508,52 @@ export default function L1() {
             )}
           </div>
 
-          {/* RIGHT — L1 refuses the non-member (live) */}
+          {/* RIGHT — L1 refuses the non-member: a REAL header-less probe of the gated read surface */}
           <div className="bg-surface-2 p-6 border-t lg:border-t-0 lg:border-l border-benchmark-500/15 flex flex-col">
-            <div className="flex items-center gap-2 text-sm font-semibold text-benchmark-300 mb-1">
-              <Lock className="w-4 h-4" /> Permissioned L1
-            </div>
-            <p className="text-xs text-gray-500 mb-4">the same competitor (a non-member) queries the L1 indexer — {liveL1 ? 'live' : 'by design'}</p>
-            <div className="flex-1 flex items-center justify-center min-h-[160px]">
-              <div className="text-center">
-                <Ban className="w-10 h-10 text-signal-down mx-auto mb-3" />
-                <div className="num text-signal-down font-semibold">403 · read refused</div>
-                <p className="text-xs text-gray-600 mt-2 max-w-[240px]">
-                  non-members cannot enumerate members or see any bid — participation is member-gated
-                  {!liveL1 && (
-                    <span className="block mt-1 text-gray-700">
-                      {GATE_PROBE_URL
-                        ? 'this exact refusal is live above — flip Member / Outsider'
-                        : 'enforced live on the sovereign L1 build'}
-                    </span>
-                  )}
-                </p>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2 text-sm font-semibold text-benchmark-300">
+                <Lock className="w-4 h-4" /> Permissioned L1
               </div>
+              {outsiderProbe?.status === 403 && (
+                <span className="pill num bg-benchmark-500/10 text-benchmark-300 border border-benchmark-500/20 text-[10px]">
+                  <Radio className="w-3 h-3 inline mr-1 animate-pulse-soft" />live
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              the same competitor (a non-member) queries the L1 read surface — {GATE_PROBE_URL ? 'live' : 'by design'}
+            </p>
+            <div className="flex-1 flex flex-col items-center justify-center min-h-[160px]">
+              {!GATE_PROBE_URL ? (
+                // No gated surface wired (local dev) — show the L1 DESIGN outcome, never a 403 we can't back.
+                <div className="text-center">
+                  <Ban className="w-10 h-10 text-signal-down mx-auto mb-3" />
+                  <div className="num text-signal-down font-semibold">403 · read refused</div>
+                  <p className="text-xs text-gray-600 mt-2 max-w-[240px]">
+                    non-members cannot enumerate members or see any bid — participation is member-gated
+                    <span className="block mt-1 text-gray-700">enforced live on the sovereign L1 build</span>
+                  </p>
+                </div>
+              ) : outsiderProbe === null ? (
+                <span className="flex items-center gap-2 text-gray-500 text-sm"><Loader2 className="w-4 h-4 animate-spin" /> probing as a non-member…</span>
+              ) : outsiderProbe.status === 403 ? (
+                <div className="text-center">
+                  <Ban className="w-10 h-10 text-signal-down mx-auto mb-3" />
+                  <div className="num text-signal-down font-semibold">403 · read refused</div>
+                  <p className="text-xs text-gray-600 mt-2 max-w-[260px]">
+                    non-members cannot enumerate members or see any bid — participation is member-gated
+                  </p>
+                  <div className="num text-[10px] text-gray-600 mt-2">GET {GATE_PROBE_URL}/members · no member signature</div>
+                </div>
+              ) : outsiderProbe.status === 200 ? (
+                // The gated surface answered a header-less read — the gate isn't enforcing. Report honestly.
+                <div className="text-center">
+                  <div className="num text-signal-stale font-semibold">200 · {outsiderProbe.count} rows</div>
+                  <p className="text-xs text-gray-600 mt-2 max-w-[260px]">read surface returned data without a signature — check READ_GATE on the indexer</p>
+                </div>
+              ) : (
+                <span className="text-gray-600 text-sm flex items-center gap-2"><X className="w-4 h-4" /> gated indexer waking — reload in ~30s</span>
+              )}
             </div>
           </div>
         </div>
