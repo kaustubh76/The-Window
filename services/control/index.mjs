@@ -129,8 +129,17 @@ app.post("/member/read-token", async (q, r) => {
     const address = String(q.body.address || "");
     if (!ethers.isAddress(address)) return r.status(400).json({ ok: false, error: "bad address" });
     const actor = actorByAddress(address);
-    const isMember = actor ? await handles().registry.isMember(address).catch(() => false) : false;
-    if (!actor || !isMember) return r.status(403).json({ ok: false, error: "not a member — the L1 read surface is member-gated" });
+    // No key for this address → we genuinely can't mint a member-signed token (the honest
+    // non-member 403 — the intruder has no key here, which IS the read-gate contrast).
+    if (!actor) return r.status(403).json({ ok: false, error: "not a member — the L1 read surface is member-gated" });
+    // Baked personas are always registered members; only re-check a dynamic (revocable) one.
+    // NEVER fail closed on a transient isMember RPC error — that spuriously 403'd real members on a
+    // Render cold start / Fuji-RPC hiccup. The indexer's READ_GATE re-verifies membership on the
+    // actual read (the real boundary), so token issuance may fail OPEN on an RPC error.
+    if (actor.dynamic) {
+      const member = await handles().registry.isMember(address).then(Boolean).catch(() => null);
+      if (member === false) return r.status(403).json({ ok: false, error: "membership revoked — no longer a member" });
+    }
     const bucket = Math.floor(Date.now() / 30000); // window-read:<floor(now/30s)>
     const sig = await new ethers.Wallet(ACTORS[actor.name].pk).signMessage(`window-read:${bucket}`);
     r.json({ ok: true, address: actor.address, sig, bucket });
